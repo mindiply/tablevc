@@ -9,6 +9,8 @@ import {
   HistoryPopulationData,
   HistoryTransaction,
   Id,
+  isTableHistoryDelta,
+  isTableMergeDelta,
   RecordChangeOperation,
   Table,
   TableFactory,
@@ -17,7 +19,9 @@ import {
   TableHistoryEntry,
   TableMergeDelta,
   TableOperationType,
-  TableRecordChange
+  TableRecordChange,
+  TableTransactionBody,
+  WritableTable
 } from './types';
 
 export interface HistoryCreationProps<RecordType> {
@@ -261,15 +265,14 @@ class MappedHistoriesEntriesList<RecordType> {
   };
 
   public mergeInRemoteDelta = (
-    historyDelta: TableHistoryDelta<RecordType>
+    historyDelta: TableMergeDelta<RecordType> | TableHistoryDelta<RecordType>
   ): null | {
     localChanges: TableRecordChange<RecordType>[];
     mergeChanges: TableRecordChange<RecordType>[];
     localCommitsIds: string[];
     mergeCommitsIds: string[];
   } => {
-    const mergeChanges: TableRecordChange<RecordType>[] = [];
-    const {changes: remoteChanges, afterCommitId} = historyDelta;
+    const {afterCommitId} = historyDelta;
     if (this.indexOf(afterCommitId) === -1) {
       return null;
     }
@@ -277,54 +280,117 @@ class MappedHistoriesEntriesList<RecordType> {
     if (!localDelta) {
       return null;
     }
-    const localOperationsMap = new Map<Id, TableRecordChange<RecordType>>();
-    for (const change of localDelta.changes) {
-      localOperationsMap.set(change.id, change);
-    }
+    const {mergeChanges, localChanges} = mergeInDeltaChanges(
+      localDelta.changes,
+      historyDelta.changes
+    );
+    const mergeCommitsIds: string[] = isTableMergeDelta(historyDelta)
+      ? [...historyDelta.existingCommitsIds, ...historyDelta.mergedInCommitsIds]
+      : isTableHistoryDelta(historyDelta)
+      ? historyDelta.commitsIds
+      : [];
 
-    for (const remoteChange of remoteChanges) {
-      const localChange = localOperationsMap.get(remoteChange.id);
-      if (localChange) {
-        if (localChange.__typename === TableOperationType.DELETE_RECORD) {
-          // we keep the local deletion, sorry mate
-        } else if (localChange.__typename === TableOperationType.ADD_RECORD) {
-          // errr, this is not expected really, duplicate id?
-          throw new Error('Id already in use');
-        } else if (
-          localChange.__typename === TableOperationType.CHANGE_RECORD
-        ) {
-          if (remoteChange.__typename === TableOperationType.DELETE_RECORD) {
-            remoteChanges.push(remoteChange);
-          } else if (
-            remoteChange.__typename === TableOperationType.CHANGE_RECORD
-          ) {
-            const fullSetOfChanges = {
-              ...remoteChange.changes,
-              ...localChange.changes
-            };
-            remoteChanges.push({
-              ...remoteChange,
-              changes: fullSetOfChanges
-            });
-          } else if (
-            remoteChange.__typename === TableOperationType.ADD_RECORD
-          ) {
-            throw new Error('Duplicate record id on remote');
-          }
-        } else {
-          mergeChanges.push(remoteChange);
-        }
-      } else {
-        throw new Error('We only deal with record changes');
-      }
-    }
     return {
-      localChanges: Array.from(localOperationsMap.values()),
-      mergeChanges: mergeChanges,
+      localChanges,
+      mergeChanges,
       localCommitsIds: localDelta.commitsIds,
-      mergeCommitsIds: historyDelta.commitsIds
+      mergeCommitsIds
     };
   };
+
+  /**
+   * You sent a client local delta to the server, and the server sends you
+   * back the merge delta that is the result. Now you need to apply that merge
+   * delta back into local.
+   *
+   * Local may also have gone a bit past since then.
+   *
+   * @param mergeDelta
+   */
+  public rebaseWithMergeDelta = (
+    mergeDelta: TableMergeDelta<RecordType>
+  ): TableRecordChange<RecordType>[] => {
+    const {
+      changes,
+      afterCommitId,
+      existingCommitsIds,
+      mergedInCommitsIds
+    } = mergeDelta;
+    const localDelta = this.getHistoryDelta(afterCommitId);
+    if (!localDelta) {
+      return [];
+    }
+    let lastMergedCommitId: string | null = null;
+    for (let i = mergedInCommitsIds.length - 1; i >= 0; i--) {
+      if (this.indexOf(mergedInCommitsIds[i]) !== -1) {
+        lastMergedCommitId = mergedInCommitsIds[i];
+        break;
+      }
+    }
+    if (!lastMergedCommitId) {
+      return [];
+    }
+    const afterMergeDelta = this.getHistoryDelta(lastMergedCommitId);
+    if (afterMergeDelta) {
+      const {mergeChanges: desiredChanges} = mergeInDeltaChanges(
+        changes,
+        afterMergeDelta.changes
+      );
+      return operationsToReachState(desiredChanges, localDelta.changes);
+    } else {
+      return operationsToReachState(changes, localDelta.changes);
+    }
+    const rebaseChanges: TableRecordChange<RecordType>[] = [];
+    return rebaseChanges;
+  };
+}
+
+function mergeInDeltaChanges<RecordType>(
+  localChanges: TableRecordChange<RecordType>[],
+  remoteChanges: TableRecordChange<RecordType>[]
+): {
+  mergeChanges: TableRecordChange<RecordType>[];
+  localChanges: TableRecordChange<RecordType>[];
+} {
+  const localOperationsMap = new Map<Id, TableRecordChange<RecordType>>();
+  const mergeChanges: TableRecordChange<RecordType>[] = [];
+  for (const change of localChanges) {
+    localOperationsMap.set(change.id, change);
+  }
+
+  for (const remoteChange of remoteChanges) {
+    const localChange = localOperationsMap.get(remoteChange.id);
+    if (localChange) {
+      if (localChange.__typename === TableOperationType.DELETE_RECORD) {
+        // we keep the local deletion, sorry mate
+      } else if (localChange.__typename === TableOperationType.ADD_RECORD) {
+        // errr, this is not expected really, duplicate id?
+        throw new Error('Id already in use');
+      } else if (localChange.__typename === TableOperationType.CHANGE_RECORD) {
+        if (remoteChange.__typename === TableOperationType.DELETE_RECORD) {
+          remoteChanges.push(remoteChange);
+        } else if (
+          remoteChange.__typename === TableOperationType.CHANGE_RECORD
+        ) {
+          const fullSetOfChanges = {
+            ...remoteChange.changes,
+            ...localChange.changes
+          };
+          remoteChanges.push({
+            ...remoteChange,
+            changes: fullSetOfChanges
+          });
+        } else if (remoteChange.__typename === TableOperationType.ADD_RECORD) {
+          throw new Error('Duplicate record id on remote');
+        }
+      } else {
+        mergeChanges.push(remoteChange);
+      }
+    } else {
+      throw new Error('We only deal with record changes');
+    }
+  }
+  return {mergeChanges, localChanges: Array.from(localOperationsMap.values())};
 }
 
 /**
@@ -334,24 +400,17 @@ class MappedHistoriesEntriesList<RecordType> {
  *
  * @param targetHistory
  * @param sourceHistory
- * @param fromCommitId
  */
 function operationsToReachState<RecordType>(
-  targetHistory: MappedHistoriesEntriesList<RecordType>,
-  sourceHistory: MappedHistoriesEntriesList<RecordType>,
-  fromCommitId: string
+  targetChanges: TableRecordChange<RecordType>[],
+  sourceChanges: TableRecordChange<RecordType>[]
 ): TableRecordChange<RecordType>[] {
   const changesNeeded: TableRecordChange<RecordType>[] = [];
-  const targetDelta = targetHistory.getHistoryDelta(fromCommitId);
-  const sourceDelta = targetHistory.getHistoryDelta(fromCommitId);
-  if (targetDelta === null || sourceDelta === null) {
-    return changesNeeded;
-  }
   const sourceChangesMap: Map<Id, TableRecordChange<RecordType>> = new Map();
-  for (const sourceChange of sourceDelta.changes) {
+  for (const sourceChange of sourceChanges) {
     sourceChangesMap.set(sourceChange.id, sourceChange);
   }
-  for (const targetChange of targetDelta.changes) {
+  for (const targetChange of targetChanges) {
     const sourceChange = sourceChangesMap.get(targetChange.id);
     if (!sourceChange) {
       changesNeeded.push(targetChange);
@@ -430,6 +489,7 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
   private readonly table: Table<RecordType>;
   private historyEntries: MappedHistoriesEntriesList<RecordType>;
   private readonly who?: Id;
+  private inTxTbl: null | WritableTable<RecordType>;
 
   constructor({tableFactory, who}: HistoryCreationProps<RecordType>) {
     this.who = who;
@@ -442,7 +502,16 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
     this.historyEntries = new MappedHistoriesEntriesList<RecordType>([
       {...initOp, commitId: commitIdForOperation({...initOp})}
     ]);
+    this.inTxTbl = null;
   }
+
+  private writeToTbl = (body: TableTransactionBody<RecordType>) => {
+    if (this.inTxTbl) {
+      return body(this.inTxTbl);
+    } else {
+      return this.table.tx(body);
+    }
+  };
 
   public get tbl() {
     return this.table;
@@ -464,7 +533,7 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
         when: new Date(),
         who: this.who
       };
-      const newRecord = await this.table.tx(async tbl => {
+      const newRecord = await this.writeToTbl(async tbl => {
         await tbl.setRecord(recordId, record);
         return tbl.getRecord(recordId);
       });
@@ -502,7 +571,7 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
         when: new Date(),
         who: this.who
       };
-      const updatedRecord = await this.table.tx(async tbl => {
+      const updatedRecord = await this.writeToTbl(async tbl => {
         await tbl.setRecord(recordId, {...originalRecord, ...recordChanges});
         return tbl.getRecord(recordId);
       });
@@ -536,7 +605,7 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
         when: new Date(),
         who: this.who
       };
-      await this.table.tx(tbl => tbl.deleteRecord(recordId));
+      await this.writeToTbl(tbl => tbl.deleteRecord(recordId));
       this.historyEntries.push({
         ...deleteOp,
         commitId: commitIdForOperation(deleteOp)
@@ -555,7 +624,7 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
   }: HistoryPopulationData<RecordType>) => {
     try {
       const existingIds = await this.table.allKeys();
-      await this.table.tx(async tbl => {
+      await this.writeToTbl(async tbl => {
         const updatedIds: Set<Id> = new Set();
         for (const updatedRecord of allRecords) {
           const recordId = idExtract(updatedRecord);
@@ -583,8 +652,18 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
     }
   };
 
-  public tx = (txBody: HistoryTransaction<RecordType>) => {
-    return txBody(this);
+  public tx = async (txBody: HistoryTransaction<RecordType>) => {
+    try {
+      const result = await this.tbl.tx(tbl => {
+        this.inTxTbl = tbl;
+        return txBody(this);
+      });
+      this.inTxTbl = null;
+      return result;
+    } catch (err) {
+      this.inTxTbl = null;
+      throw err;
+    }
   };
 
   public getHistoryDelta = (fromCommitId: string, toCommitId?: string) =>
@@ -648,7 +727,11 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
       }
     });
 
-  public applyMerge = async () => {};
+  public applyMerge = async (
+    mergeDelta: TableMergeDelta<RecordType>
+  ): Promise<void> => {
+    const changesNeeded = this.historyEntries.mergeInRemoteDelta(mergeDelta);
+  };
 
   public lastCommitId = (): string => {
     const commitId = this.historyEntries.lastCommitId();

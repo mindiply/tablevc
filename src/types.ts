@@ -127,12 +127,27 @@ export interface TableHistoryDelta<RecordType> {
   changes: TableRecordChange<RecordType>[];
 }
 
+export const isTableHistoryDelta = (obj: any): obj is TableHistoryDelta<any> =>
+  obj &&
+  typeof obj === 'object' &&
+  typeof obj.afterCommitId === 'string' &&
+  Array.isArray(obj.commitsIds) &&
+  Array.isArray(obj.changes);
+
 export interface TableMergeDelta<RecordType> {
   afterCommitId: string;
   mergedInCommitsIds: string[];
   existingCommitsIds: string[];
   changes: TableRecordChange<RecordType>[];
 }
+
+export const isTableMergeDelta = (obj: any): obj is TableMergeDelta<any> =>
+  obj &&
+  typeof obj === 'object' &&
+  typeof obj.afterCommitId === 'string' &&
+  Array.isArray(obj.mergedInCommitsIds) &&
+  Array.isArray(obj.existingCommitsIds) &&
+  Array.isArray(obj.changes);
 
 export interface HistoryMergeOperation<RecordType> extends BaseHistoryEntry {
   __typename: HistoryOperationType.HISTORY_MERGE_IN;
