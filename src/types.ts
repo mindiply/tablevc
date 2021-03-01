@@ -198,10 +198,14 @@ export interface TableVersionHistory<RecordType> {
   ) => TableRecordChange<RecordType>[];
 }
 
-export interface HistoryChannel<RecordType> {
-  (delta: TableHistoryDelta<RecordType>): Promise<
-    TableHistoryDelta<RecordType>
-  >;
+export interface PushToServerChannel<RecordType> {
+  (
+    delta: TableHistoryDelta<RecordType>
+  ): Promise<HistoryMergeOperation<RecordType> | null>;
+}
+
+export interface PullFromServerChannel<RecordType> {
+  (mergeDelta: HistoryMergeOperation<RecordType>): Promise<void>;
 }
 
 /**
@@ -226,8 +230,17 @@ export interface VersionedTable<RecordType>
   ) => null | TableHistoryDelta<RecordType>;
   mergeWith: (
     historyDelta: TableHistoryDelta<RecordType>
-  ) => Promise<TableMergeDelta<RecordType> | null>;
-  applyMerge: (mergeDelta: TableMergeDelta<RecordType>) => Promise<void>;
+  ) => Promise<HistoryMergeOperation<RecordType> | null>;
+  applyMerge: (mergeDelta: HistoryMergeOperation<RecordType>) => Promise<void>;
+}
+
+/**
+ * Represents the last commitId we synchronized via a merge or on initial data
+ * load from the server.
+ */
+export interface ClientVersionedTable<RecordType>
+  extends VersionedTable<RecordType> {
+  readonly lastRemoteCommitId: null | string;
 }
 
 export interface GetRecordIdFn<RecordType> {
@@ -248,15 +261,15 @@ export interface TableFactory<RecordType> {
   (options?: TablePopulationData<RecordType>): Table<RecordType>;
 }
 
-export interface HistoryFactoryOptions<RecordType> {
+export interface VersioningFactoryOptions<RecordType> {
   who?: Id;
   populationData?: HistoryPopulationData<RecordType>;
 }
 
-export interface TableHistoryFactory<RecordType> {
+export interface VersionedTableFactory<RecordType> {
   (
     tableFactory: TableFactory<RecordType>,
-    historyOptions: HistoryFactoryOptions<RecordType>
+    historyOptions: VersioningFactoryOptions<RecordType>
   ): Promise<VersionedTable<RecordType>>;
 }
 

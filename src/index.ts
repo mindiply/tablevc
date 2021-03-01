@@ -2,7 +2,7 @@ import {
   HistoryPopulationData,
   Id,
   TableFactory,
-  TableHistoryFactory
+  VersionedTableFactory
 } from './types';
 import {mapTableFactory} from './MapTable';
 import {InMemoryHistoryFactory} from './InMemoryHistory';
@@ -18,7 +18,7 @@ export enum HistoryType {
 }
 
 interface CreateHistoryProps<RecordType> {
-  dbType?: DbType;
+  dbType?: DbType | TableFactory<RecordType>;
   historyType?: HistoryType;
   initialData?: HistoryPopulationData<RecordType>;
   who?: Id;
@@ -33,7 +33,7 @@ const dbTypeFactory = (dbType: DbType): TableFactory<any> => {
 
 const historyTypeFactory = (
   historyType: HistoryType
-): TableHistoryFactory<any> => {
+): VersionedTableFactory<any> => {
   if (historyType === HistoryType.memoryHistory) {
     return InMemoryHistoryFactory;
   }
@@ -52,7 +52,7 @@ export async function createVersionedTable<RecordType>(
     initialData,
     who
   } = options;
-  const dbFactory = dbTypeFactory(dbType);
+  const dbFactory = typeof dbType === 'number' ? dbTypeFactory(dbType) : dbType;
   const historyFactory = historyTypeFactory(historyType);
   const history = await historyFactory(dbFactory, {
     populationData: initialData,

@@ -7,7 +7,10 @@
     "build": "run-p build:**",
     "build:transpile": "babel src --ignore \"src/**/.git*\" --extensions \".ts\" --out-dir lib --source-maps",
     "build:types": "tsc --emitDeclarationOnly",
-    "test": "jest"
+    "lint": "eslint --ext .ts \"src/**\"",
+    "prepublishOnly": "run-s lint test build",
+    "test": "jest",
+    "test-cover": "jest --coverage"
   },
   "keywords": [
     "synchronization",

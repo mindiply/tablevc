@@ -2,7 +2,7 @@ import jsSHA from 'jssha';
 import {
   AddRecord,
   ChangeRecord,
-  HistoryFactoryOptions,
+  VersioningFactoryOptions,
   HistoryInit,
   HistoryMergeOperation,
   HistoryOperationType,
@@ -22,7 +22,8 @@ import {
   TableTransactionBody,
   TableVersionHistory,
   VersionedTable,
-  WritableTable
+  WritableTable,
+  ClientVersionedTable
 } from './types';
 
 export interface HistoryCreationProps<RecordType> {
@@ -500,11 +501,12 @@ function operationsToReachState<RecordType>(
   return changesNeeded;
 }
 
-class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
+class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
   private readonly table: Table<RecordType>;
   private historyEntries: MappedHistoriesEntriesList<RecordType>;
   private readonly who?: Id;
   private inTxTbl: null | WritableTable<RecordType>;
+  private _lastRemoteCommitId: null | string;
 
   constructor({tableFactory, who}: HistoryCreationProps<RecordType>) {
     this.who = who;
@@ -518,6 +520,7 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
       {...initOp, commitId: commitIdForOperation({...initOp})}
     ]);
     this.inTxTbl = null;
+    this._lastRemoteCommitId = null;
   }
 
   private writeToTbl = (body: TableTransactionBody<RecordType>) => {
@@ -527,6 +530,10 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
       return this.table.tx(body);
     }
   };
+
+  public get lastRemoteCommitId() {
+    return this._lastRemoteCommitId;
+  }
 
   public get tbl() {
     return this.table;
@@ -665,6 +672,7 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
         commitId,
         who: this.who
       });
+      this._lastRemoteCommitId = commitId;
     } catch (err) {
       // Do nothing
     }
@@ -689,14 +697,14 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
 
   public mergeWith = async (
     historyDelta: TableHistoryDelta<RecordType>
-  ): Promise<TableMergeDelta<RecordType> | null> => {
+  ): Promise<HistoryMergeOperation<RecordType> | null> => {
     const mergeResult = this.historyEntries.mergeInRemoteDelta(historyDelta);
 
     if (mergeResult === null) {
       return null;
     }
     await this.applyRecordOperationsToDB(mergeResult.mergeChanges);
-    const mergeOp: Omit<HistoryMergeOperation<RecordType>, 'commitId'> = {
+    const baseMergeOp: Omit<HistoryMergeOperation<RecordType>, 'commitId'> = {
       __typename: HistoryOperationType.HISTORY_MERGE_IN,
       mergeDelta: {
         changes: mergeResult.mergeChanges,
@@ -707,19 +715,18 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
       when: new Date(),
       who: this.who
     };
-    this.historyEntries.push({
-      ...mergeOp,
-      commitId: commitIdForOperation(mergeOp)
-    });
+    const mergeOp = {
+      ...baseMergeOp,
+      commitId: commitIdForOperation(baseMergeOp)
+    };
+    this.historyEntries.push(mergeOp);
     const deltaForRemote = this.historyEntries.getHistoryDelta(
       historyDelta.afterCommitId
     );
     const changesForRemote = deltaForRemote ? deltaForRemote.changes : [];
     return {
-      mergedInCommitsIds: mergeResult.mergeCommitsIds,
-      existingCommitsIds: mergeResult.localCommitsIds,
-      afterCommitId: historyDelta.afterCommitId,
-      changes: changesForRemote
+      ...mergeOp,
+      mergeDelta: {...mergeOp.mergeDelta, changes: changesForRemote}
     };
   };
 
@@ -750,8 +757,9 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
     });
 
   public applyMerge = async (
-    mergeDelta: TableMergeDelta<RecordType>
+    mergeEntry: HistoryMergeOperation<RecordType>
   ): Promise<void> => {
+    const {mergeDelta, commitId} = mergeEntry;
     if (this.historyEntries.indexOf(mergeDelta.afterCommitId) === -1) {
       return;
     }
@@ -772,7 +780,8 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
         mergedInCommitsIds.push(mergeCommitId);
       }
     }
-    const mergeOp: Omit<HistoryMergeOperation<RecordType>, 'commitId'> = {
+    this._lastRemoteCommitId = commitId;
+    this.historyEntries.push({
       __typename: HistoryOperationType.HISTORY_MERGE_IN,
       mergeDelta: {
         changes: changesNeeded,
@@ -781,11 +790,8 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
         mergedInCommitsIds
       },
       when: new Date(),
-      who: this.who
-    };
-    this.historyEntries.push({
-      ...mergeOp,
-      commitId: commitIdForOperation(mergeOp)
+      who: this.who,
+      commitId
     });
   };
 
@@ -813,7 +819,7 @@ class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
 
 export async function InMemoryHistoryFactory<RecordType>(
   tableFactory: TableFactory<RecordType>,
-  {who, populationData}: HistoryFactoryOptions<RecordType>
+  {who, populationData}: VersioningFactoryOptions<RecordType>
 ): Promise<VersionedTable<RecordType>> {
   const history = new InMemoryHistory({tableFactory, who});
   if (populationData) {

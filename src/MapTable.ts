@@ -3,7 +3,6 @@
  * */
 
 import {
-  GetRecordIdFn,
   Id,
   KeyFilter,
   SyncReadTable,
