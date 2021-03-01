@@ -168,7 +168,7 @@ export interface TableVersionHistory<RecordType> {
 
   readonly length: number;
 
-  push: (entry: TableHistoryEntry<RecordType>) => number;
+  push: (entry: TableHistoryEntry<RecordType>) => Promise<number>;
 
   clear: () => void;
 
@@ -196,6 +196,10 @@ export interface TableVersionHistory<RecordType> {
   rebaseWithMergeDelta: (
     mergeDelta: TableMergeDelta<RecordType>
   ) => TableRecordChange<RecordType>[];
+}
+
+export interface TableVersionHistoryLoader<RecordType> {
+  (fromCommitId?: string): Promise<TableVersionHistory<RecordType>>;
 }
 
 export interface PushToServerChannel<RecordType> {

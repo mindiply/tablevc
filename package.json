@@ -2,7 +2,7 @@
   "name": "tablevc",
   "version": "0.0.1",
   "description": "Version control of tables of data",
-  "main": "dist/index.js",
+  "main": "lib/index.js",
   "scripts": {
     "build": "run-p build:**",
     "build:transpile": "babel src --ignore \"src/**/.git*\" --extensions \".ts\" --out-dir lib --source-maps",

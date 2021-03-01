@@ -26,8 +26,9 @@ import {
   ClientVersionedTable
 } from './types';
 
-export interface HistoryCreationProps<RecordType> {
-  tableFactory: TableFactory<RecordType>;
+interface HistoryCreationProps<RecordType> {
+  tableHistory: TableVersionHistory<RecordType>;
+  table: Table<RecordType>;
   who?: Id;
 }
 
@@ -130,7 +131,9 @@ class MappedHistoriesEntriesList<RecordType>
     );
   };
 
-  public push = (entry: TableHistoryEntry<RecordType>): number => {
+  public push = async (
+    entry: TableHistoryEntry<RecordType>
+  ): Promise<number> => {
     const index = this.recordsList.push(entry) - 1;
     this.recordsById.set(entry.commitId, index);
     return this.recordsList.length;
@@ -503,22 +506,15 @@ function operationsToReachState<RecordType>(
 
 class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
   private readonly table: Table<RecordType>;
-  private historyEntries: MappedHistoriesEntriesList<RecordType>;
+  private historyEntries: TableVersionHistory<RecordType>;
   private readonly who?: Id;
   private inTxTbl: null | WritableTable<RecordType>;
   private _lastRemoteCommitId: null | string;
 
-  constructor({tableFactory, who}: HistoryCreationProps<RecordType>) {
+  constructor({table, tableHistory, who}: HistoryCreationProps<RecordType>) {
     this.who = who;
-    this.table = tableFactory();
-    const initOp: Omit<HistoryInit, 'commitId'> = {
-      __typename: HistoryOperationType.HISTORY_INIT,
-      when: new Date(),
-      who
-    };
-    this.historyEntries = new MappedHistoriesEntriesList<RecordType>([
-      {...initOp, commitId: commitIdForOperation({...initOp})}
-    ]);
+    this.table = table;
+    this.historyEntries = tableHistory;
     this.inTxTbl = null;
     this._lastRemoteCommitId = null;
   }
@@ -547,7 +543,8 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
     this.historyEntries.branch(toCommitId);
 
   public addRecord = async (recordId: Id, record: RecordType) => {
-    try {
+    return this.writeToTbl(async tbl => {
+      await tbl.setRecord(recordId, record);
       const addOp: Omit<RecordChangeOperation<RecordType>, 'commitId'> = {
         __typename: HistoryOperationType.TABLE_RECORD_CHANGE,
         change: {
@@ -558,29 +555,23 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
         when: new Date(),
         who: this.who
       };
-      const newRecord = await this.writeToTbl(async tbl => {
-        await tbl.setRecord(recordId, record);
-        return tbl.getRecord(recordId);
-      });
+      const newRecord = await tbl.getRecord(recordId);
       if (!newRecord) {
         throw new Error('Unable to add new record in table');
       }
-      this.historyEntries.push({
+      await this.historyEntries.push({
         ...addOp,
         commitId: commitIdForOperation(addOp)
       });
       return newRecord;
-    } catch (err) {
-      // Do nothing or throw? Probably throw
-      throw err;
-    }
+    });
   };
 
   public updateRecord = async (
     recordId: Id,
     recordChanges: Partial<RecordType>
   ) => {
-    try {
+    return this.writeToTbl(async tbl => {
       const originalRecord = await this.table.getRecord(recordId);
       if (!originalRecord) {
         throw new Error('Record to update not found');
@@ -596,46 +587,43 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
         when: new Date(),
         who: this.who
       };
-      const updatedRecord = await this.writeToTbl(async tbl => {
-        await tbl.setRecord(recordId, {...originalRecord, ...recordChanges});
-        return tbl.getRecord(recordId);
-      });
+      await tbl.setRecord(recordId, {...originalRecord, ...recordChanges});
+      const updatedRecord = tbl.getRecord(recordId);
       if (!updatedRecord) {
         throw new Error('Unable to update record in table');
       }
-      this.historyEntries.push({
+      await this.historyEntries.push({
         ...changeOp,
         commitId: commitIdForOperation(changeOp)
       });
       return updatedRecord;
-    } catch (err) {
-      // Do nothing or throw? Probably throw
-      throw new Error('Error while updating a record');
-    }
+    });
   };
 
   public deleteRecord = async (recordId: Id) => {
     try {
-      const originalRecord = await this.table.getRecord(recordId);
-      if (!originalRecord) {
-        return false;
-      }
-      const deleteOp: Omit<RecordChangeOperation<RecordType>, 'commitId'> = {
-        __typename: HistoryOperationType.TABLE_RECORD_CHANGE,
-        change: {
-          __typename: TableOperationType.DELETE_RECORD,
-          id: recordId,
-          original: originalRecord
-        },
-        when: new Date(),
-        who: this.who
-      };
-      await this.writeToTbl(tbl => tbl.deleteRecord(recordId));
-      this.historyEntries.push({
-        ...deleteOp,
-        commitId: commitIdForOperation(deleteOp)
+      await this.writeToTbl(async tbl => {
+        const originalRecord = await this.table.getRecord(recordId);
+        if (!originalRecord) {
+          return false;
+        }
+        const deleteOp: Omit<RecordChangeOperation<RecordType>, 'commitId'> = {
+          __typename: HistoryOperationType.TABLE_RECORD_CHANGE,
+          change: {
+            __typename: TableOperationType.DELETE_RECORD,
+            id: recordId,
+            original: originalRecord
+          },
+          when: new Date(),
+          who: this.who
+        };
+        await tbl.deleteRecord(recordId);
+        await this.historyEntries.push({
+          ...deleteOp,
+          commitId: commitIdForOperation(deleteOp)
+        });
+        return true;
       });
-      return true;
     } catch (err) {
       // Do nothing or throw? Probably throw
     }
@@ -661,18 +649,18 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
             await tbl.deleteRecord(existingId);
           }
         }
+        const sampleRows = allRecords.slice(0, 500);
+        this.historyEntries.clear();
+        await this.historyEntries.push({
+          __typename: HistoryOperationType.HISTORY_FULL_TABLE_REFRESH,
+          sampleRows,
+          nRows: allRecords.length,
+          when: new Date(),
+          commitId,
+          who: this.who
+        });
+        this._lastRemoteCommitId = commitId;
       });
-      const sampleRows = allRecords.slice(0, 500);
-      this.historyEntries.clear();
-      this.historyEntries.push({
-        __typename: HistoryOperationType.HISTORY_FULL_TABLE_REFRESH,
-        sampleRows,
-        nRows: allRecords.length,
-        when: new Date(),
-        commitId,
-        who: this.who
-      });
-      this._lastRemoteCommitId = commitId;
     } catch (err) {
       // Do nothing
     }
@@ -703,23 +691,27 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
     if (mergeResult === null) {
       return null;
     }
-    await this.applyRecordOperationsToDB(mergeResult.mergeChanges);
-    const baseMergeOp: Omit<HistoryMergeOperation<RecordType>, 'commitId'> = {
-      __typename: HistoryOperationType.HISTORY_MERGE_IN,
-      mergeDelta: {
-        changes: mergeResult.mergeChanges,
-        afterCommitId: historyDelta.afterCommitId,
-        existingCommitsIds: mergeResult.localCommitsIds,
-        mergedInCommitsIds: mergeResult.mergeCommitsIds
-      },
-      when: new Date(),
-      who: this.who
-    };
-    const mergeOp = {
-      ...baseMergeOp,
-      commitId: commitIdForOperation(baseMergeOp)
-    };
-    this.historyEntries.push(mergeOp);
+    const mergeOp = await this.writeToTbl(async () => {
+      await this.applyRecordOperationsToDB(mergeResult.mergeChanges);
+      const baseMergeOp: Omit<HistoryMergeOperation<RecordType>, 'commitId'> = {
+        __typename: HistoryOperationType.HISTORY_MERGE_IN,
+        mergeDelta: {
+          changes: mergeResult.mergeChanges,
+          afterCommitId: historyDelta.afterCommitId,
+          existingCommitsIds: mergeResult.localCommitsIds,
+          mergedInCommitsIds: mergeResult.mergeCommitsIds
+        },
+        when: new Date(),
+        who: this.who
+      };
+      const mergeOp = {
+        ...baseMergeOp,
+        commitId: commitIdForOperation(baseMergeOp)
+      };
+      await this.historyEntries.push(mergeOp);
+      return mergeOp;
+    });
+
     const deltaForRemote = this.historyEntries.getHistoryDelta(
       historyDelta.afterCommitId
     );
@@ -733,7 +725,7 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
   private applyRecordOperationsToDB = async (
     recordOperations: TableRecordChange<RecordType>[]
   ) =>
-    this.table.tx(async tbl => {
+    this.writeToTbl(async tbl => {
       for (const recordOperation of recordOperations) {
         if (recordOperation.__typename === TableOperationType.DELETE_RECORD) {
           await tbl.deleteRecord(recordOperation.id);
@@ -764,34 +756,36 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
       return;
     }
     const changesNeeded = this.historyEntries.rebaseWithMergeDelta(mergeDelta);
-    if (changesNeeded.length > 0) {
-      await this.applyRecordOperationsToDB(changesNeeded);
-    }
-    const allMergeCommitsIds = [
-      ...mergeDelta.existingCommitsIds,
-      ...mergeDelta.mergedInCommitsIds
-    ];
-    const existingCommitsIds: string[] = [];
-    const mergedInCommitsIds: string[] = [];
-    for (const mergeCommitId of allMergeCommitsIds) {
-      if (this.historyEntries.indexOf(mergeCommitId) !== -1) {
-        existingCommitsIds.push(mergeCommitId);
-      } else {
-        mergedInCommitsIds.push(mergeCommitId);
+    await this.writeToTbl(async () => {
+      if (changesNeeded.length > 0) {
+        await this.applyRecordOperationsToDB(changesNeeded);
       }
-    }
-    this._lastRemoteCommitId = commitId;
-    this.historyEntries.push({
-      __typename: HistoryOperationType.HISTORY_MERGE_IN,
-      mergeDelta: {
-        changes: changesNeeded,
-        afterCommitId: mergeDelta.afterCommitId,
-        existingCommitsIds,
-        mergedInCommitsIds
-      },
-      when: new Date(),
-      who: this.who,
-      commitId
+      const allMergeCommitsIds = [
+        ...mergeDelta.existingCommitsIds,
+        ...mergeDelta.mergedInCommitsIds
+      ];
+      const existingCommitsIds: string[] = [];
+      const mergedInCommitsIds: string[] = [];
+      for (const mergeCommitId of allMergeCommitsIds) {
+        if (this.historyEntries.indexOf(mergeCommitId) !== -1) {
+          existingCommitsIds.push(mergeCommitId);
+        } else {
+          mergedInCommitsIds.push(mergeCommitId);
+        }
+      }
+      this._lastRemoteCommitId = commitId;
+      await this.historyEntries.push({
+        __typename: HistoryOperationType.HISTORY_MERGE_IN,
+        mergeDelta: {
+          changes: changesNeeded,
+          afterCommitId: mergeDelta.afterCommitId,
+          existingCommitsIds,
+          mergedInCommitsIds
+        },
+        when: new Date(),
+        who: this.who,
+        commitId
+      });
     });
   };
 
@@ -821,7 +815,16 @@ export async function InMemoryHistoryFactory<RecordType>(
   tableFactory: TableFactory<RecordType>,
   {who, populationData}: VersioningFactoryOptions<RecordType>
 ): Promise<VersionedTable<RecordType>> {
-  const history = new InMemoryHistory({tableFactory, who});
+  const table = tableFactory();
+  const initOp: Omit<HistoryInit, 'commitId'> = {
+    __typename: HistoryOperationType.HISTORY_INIT,
+    when: new Date(),
+    who
+  };
+  const tableHistory = new MappedHistoriesEntriesList<RecordType>([
+    {...initOp, commitId: commitIdForOperation({...initOp})}
+  ]);
+  const history = new InMemoryHistory({table, tableHistory, who});
   if (populationData) {
     await history.refreshTable(populationData);
   }
