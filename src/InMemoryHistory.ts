@@ -14,13 +14,14 @@ import {
   RecordChangeOperation,
   Table,
   TableFactory,
-  TableHistory,
   TableHistoryDelta,
   TableHistoryEntry,
   TableMergeDelta,
   TableOperationType,
   TableRecordChange,
   TableTransactionBody,
+  TableVersionHistory,
+  VersionedTable,
   WritableTable
 } from './types';
 
@@ -75,7 +76,8 @@ class HistoryEntriesIterator<RecordType>
   }
 }
 
-class MappedHistoriesEntriesList<RecordType> {
+class MappedHistoriesEntriesList<RecordType>
+  implements TableVersionHistory<RecordType> {
   private recordsList: TableHistoryEntry<RecordType>[];
   private recordsById: Map<string, number>;
 
@@ -85,6 +87,18 @@ class MappedHistoriesEntriesList<RecordType> {
       initialElements.map((record, index) => [record.commitId, index])
     );
   }
+
+  public branch = (untilCommitId?: string) => {
+    if (!untilCommitId) {
+      return new MappedHistoriesEntriesList([...this.recordsList]);
+    }
+    const targetIndex = this.indexOf(untilCommitId);
+    return new MappedHistoriesEntriesList(
+      targetIndex !== -1
+        ? this.recordsList.slice(0, targetIndex + 1)
+        : this.recordsList.slice()
+    );
+  };
 
   public get length() {
     return this.recordsList.length;
@@ -172,7 +186,7 @@ class MappedHistoriesEntriesList<RecordType> {
     if (targetCommitId === null || startCommitIndex === -1) {
       return null;
     }
-    let cumulativeChangeByRecord: Map<
+    const cumulativeChangeByRecord: Map<
       Id,
       TableRecordChange<RecordType>
     > = new Map();
@@ -198,7 +212,12 @@ class MappedHistoriesEntriesList<RecordType> {
     for (const change of allRecordsChanges) {
       if (change.__typename === TableOperationType.DELETE_RECORD) {
         const existingChange = cumulativeChangeByRecord.get(change.id);
-        if (existingChange) {
+        if (
+          existingChange &&
+          existingChange.__typename === TableOperationType.ADD_RECORD
+        ) {
+          // If we have added a record, and eventually deleted it, don't
+          // even record the addition
           cumulativeChangeByRecord.delete(change.id);
         } else {
           cumulativeChangeByRecord.set(change.id, change);
@@ -310,12 +329,7 @@ class MappedHistoriesEntriesList<RecordType> {
   public rebaseWithMergeDelta = (
     mergeDelta: TableMergeDelta<RecordType>
   ): TableRecordChange<RecordType>[] => {
-    const {
-      changes,
-      afterCommitId,
-      existingCommitsIds,
-      mergedInCommitsIds
-    } = mergeDelta;
+    const {changes, afterCommitId, mergedInCommitsIds} = mergeDelta;
     const localDelta = this.getHistoryDelta(afterCommitId);
     if (!localDelta) {
       return [];
@@ -368,7 +382,8 @@ function mergeInDeltaChanges<RecordType>(
         throw new Error('Id already in use');
       } else if (localChange.__typename === TableOperationType.CHANGE_RECORD) {
         if (remoteChange.__typename === TableOperationType.DELETE_RECORD) {
-          remoteChanges.push(remoteChange);
+          // We prevent the deletion if we have local changes
+          // mergeChanges.push(remoteChange);
         } else if (
           remoteChange.__typename === TableOperationType.CHANGE_RECORD
         ) {
@@ -376,7 +391,7 @@ function mergeInDeltaChanges<RecordType>(
             ...remoteChange.changes,
             ...localChange.changes
           };
-          remoteChanges.push({
+          mergeChanges.push({
             ...remoteChange,
             changes: fullSetOfChanges
           });
@@ -387,7 +402,7 @@ function mergeInDeltaChanges<RecordType>(
         mergeChanges.push(remoteChange);
       }
     } else {
-      throw new Error('We only deal with record changes');
+      mergeChanges.push(remoteChange);
     }
   }
   return {mergeChanges, localChanges: Array.from(localOperationsMap.values())};
@@ -485,7 +500,7 @@ function operationsToReachState<RecordType>(
   return changesNeeded;
 }
 
-class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
+class InMemoryHistory<RecordType> implements VersionedTable<RecordType> {
   private readonly table: Table<RecordType>;
   private historyEntries: MappedHistoriesEntriesList<RecordType>;
   private readonly who?: Id;
@@ -520,6 +535,9 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
   public get syncTbl() {
     return this.table.syncTbl;
   }
+
+  public branchVersionHistory = (toCommitId?: string) =>
+    this.historyEntries.branch(toCommitId);
 
   public addRecord = async (recordId: Id, record: RecordType) => {
     try {
@@ -693,11 +711,15 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
       ...mergeOp,
       commitId: commitIdForOperation(mergeOp)
     });
+    const deltaForRemote = this.historyEntries.getHistoryDelta(
+      historyDelta.afterCommitId
+    );
+    const changesForRemote = deltaForRemote ? deltaForRemote.changes : [];
     return {
       mergedInCommitsIds: mergeResult.mergeCommitsIds,
       existingCommitsIds: mergeResult.localCommitsIds,
       afterCommitId: historyDelta.afterCommitId,
-      changes: [...mergeResult.localChanges, ...mergeResult.mergeChanges]
+      changes: changesForRemote
     };
   };
 
@@ -730,7 +752,41 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
   public applyMerge = async (
     mergeDelta: TableMergeDelta<RecordType>
   ): Promise<void> => {
-    const changesNeeded = this.historyEntries.mergeInRemoteDelta(mergeDelta);
+    if (this.historyEntries.indexOf(mergeDelta.afterCommitId) === -1) {
+      return;
+    }
+    const changesNeeded = this.historyEntries.rebaseWithMergeDelta(mergeDelta);
+    if (changesNeeded.length > 0) {
+      await this.applyRecordOperationsToDB(changesNeeded);
+    }
+    const allMergeCommitsIds = [
+      ...mergeDelta.existingCommitsIds,
+      ...mergeDelta.mergedInCommitsIds
+    ];
+    const existingCommitsIds: string[] = [];
+    const mergedInCommitsIds: string[] = [];
+    for (const mergeCommitId of allMergeCommitsIds) {
+      if (this.historyEntries.indexOf(mergeCommitId) !== -1) {
+        existingCommitsIds.push(mergeCommitId);
+      } else {
+        mergedInCommitsIds.push(mergeCommitId);
+      }
+    }
+    const mergeOp: Omit<HistoryMergeOperation<RecordType>, 'commitId'> = {
+      __typename: HistoryOperationType.HISTORY_MERGE_IN,
+      mergeDelta: {
+        changes: changesNeeded,
+        afterCommitId: mergeDelta.afterCommitId,
+        existingCommitsIds,
+        mergedInCommitsIds
+      },
+      when: new Date(),
+      who: this.who
+    };
+    this.historyEntries.push({
+      ...mergeOp,
+      commitId: commitIdForOperation(mergeOp)
+    });
   };
 
   public lastCommitId = (): string => {
@@ -758,7 +814,7 @@ class InMemoryHistory<RecordType> implements TableHistory<RecordType> {
 export async function InMemoryHistoryFactory<RecordType>(
   tableFactory: TableFactory<RecordType>,
   {who, populationData}: HistoryFactoryOptions<RecordType>
-): Promise<TableHistory<RecordType>> {
+): Promise<VersionedTable<RecordType>> {
   const history = new InMemoryHistory({tableFactory, who});
   if (populationData) {
     await history.refreshTable(populationData);

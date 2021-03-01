@@ -1,4 +1,4 @@
-import {createHistory, HistoryOperationType, Id, TableOperationType} from '../src';
+import {createVersionedTable, Id, TableOperationType} from '../src';
 
 interface TstRecordType {
   _id: Id;
@@ -19,15 +19,19 @@ const emptyTestRecord = (): TstRecordType => ({
   when: new Date()
 });
 
+function idExtract(record: TstRecordType): Id {
+  return record._id;
+}
+
 describe('Basic table interaction via history', () => {
   test('Table with empty history should have no records', async () => {
-    const history = await createHistory();
+    const history = await createVersionedTable();
     const nRecords = await history.tbl.size();
     expect(nRecords).toBe(0);
   });
 
   test('Table with one record', async () => {
-    const history = await createHistory();
+    const history = await createVersionedTable();
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -40,17 +44,13 @@ describe('Basic table interaction via history', () => {
   });
 
   test('Table with two records, one being changed', async () => {
-    const history = await createHistory<TstRecordType>();
+    const history = await createVersionedTable<TstRecordType>();
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
     };
     await history.addRecord('TEST1', testRecord);
 
-    const testRecord2 = {
-      ...emptyTestRecord(),
-      _id: 'TEST2'
-    };
     await history.addRecord('TEST2', testRecord);
     await history.updateRecord('TEST1', {name: 'Test 1 is my name'});
     const nRecords = await history.tbl.size();
@@ -64,7 +64,7 @@ describe('Basic table interaction via history', () => {
       ...emptyTestRecord(),
       _id: 'TEST1'
     };
-    const history = await createHistory({
+    const history = await createVersionedTable({
       initialData: {
         commitId: 'TEST_COMMIT_ID',
         idExtract: (record: TstRecordType) => record._id,
@@ -95,7 +95,7 @@ describe('Basic table interaction via history', () => {
       ...emptyTestRecord(),
       _id: 'TEST3'
     };
-    const history = await createHistory({
+    const history = await createVersionedTable({
       initialData: {
         commitId: 'TEST_COMMIT_ID',
         idExtract: (record: TstRecordType) => record._id,
@@ -120,7 +120,7 @@ describe('Basic table interaction via history', () => {
       ...emptyTestRecord(),
       _id: 'TEST1'
     };
-    const history = await createHistory({
+    const history = await createVersionedTable({
       initialData: {
         commitId: 'TEST_COMMIT_ID',
         idExtract: (record: TstRecordType) => record._id,
@@ -150,7 +150,7 @@ describe('Basic table interaction via history', () => {
 
 describe('Generating deltas', () => {
   test('Generate a straight forward delta', async () => {
-    const history = await createHistory<TstRecordType>();
+    const history = await createVersionedTable<TstRecordType>();
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -162,15 +162,224 @@ describe('Generating deltas', () => {
   });
 
   test('Generate an empty delta', async () => {
-    const history = await createHistory<TstRecordType>();
+    const history = await createVersionedTable<TstRecordType>();
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
     };
     await history.addRecord('TEST1', testRecord);
     await history.updateRecord('TEST1', {name: 'NewName'});
-    await history.deleteRecord('TEST1')
+    await history.deleteRecord('TEST1');
     const delta = history.getHistoryDelta(history.firstCommitId());
     expect(delta).toBe(null);
+  });
+});
+
+describe('Merging different branches', () => {
+  test('Perform not conflicting synchronization', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const h1 = await createVersionedTable<TstRecordType>();
+    const h2 = await createVersionedTable<TstRecordType>({
+      initialData: {
+        commitId: h1.lastCommitId(),
+        data: [],
+        idExtract
+      }
+    });
+    await h1.addRecord(testRecord._id, testRecord);
+    await h2.addRecord(testRecord2._id, testRecord2);
+    const h2Delta = h2.getHistoryDelta(h1.firstCommitId());
+    const mergeDelta = await h1.mergeWith(h2Delta!);
+    await h2.applyMerge(mergeDelta!);
+
+    expect(h1.syncTbl!.syncSize()).toBe(2);
+    expect(h1.syncTbl!.syncGetRecord('TEST1')).toEqual(testRecord);
+    expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(h2.syncTbl!.syncSize()).toBe(2);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual(testRecord);
+    expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
+  test('Perform conflicting concurrent synchronization - change vs delete', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const h1 = await createVersionedTable<TstRecordType>();
+    await h1.addRecord(testRecord._id, testRecord);
+    const branchingCommitId = h1.lastCommitId();
+    const h2 = await createVersionedTable<TstRecordType>({
+      initialData: {
+        commitId: branchingCommitId,
+        data: h1.syncTbl!.syncGetRecords(),
+        idExtract
+      }
+    });
+    await h2.addRecord(testRecord2._id, testRecord2);
+    await h2.deleteRecord(testRecord._id);
+    await h1.updateRecord(testRecord._id, {amount: 251177});
+    const h2Delta = h2.getHistoryDelta(branchingCommitId);
+    const mergeDelta = await h1.mergeWith(h2Delta!);
+    await h2.applyMerge(mergeDelta!);
+
+    expect(h1.syncTbl!.syncSize()).toBe(2);
+    expect(h1.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 251177
+    });
+    expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(h2.syncTbl!.syncSize()).toBe(2);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 251177
+    });
+    expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
+  test('Perform non conflicting concurrent synchronization', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const h1 = await createVersionedTable<TstRecordType>();
+    await h1.addRecord(testRecord._id, testRecord);
+    const branchingCommitId = h1.lastCommitId();
+    const h2 = await createVersionedTable<TstRecordType>({
+      initialData: {
+        commitId: branchingCommitId,
+        data: h1.syncTbl!.syncGetRecords(),
+        idExtract
+      }
+    });
+    await h2.addRecord(testRecord2._id, testRecord2);
+    await h2.updateRecord(testRecord._id, {name: 'Updated Test Record 1'});
+    await h1.updateRecord(testRecord._id, {amount: 251177});
+    const h2Delta = h2.getHistoryDelta(branchingCommitId);
+    const mergeDelta = await h1.mergeWith(h2Delta!);
+    await h2.applyMerge(mergeDelta!);
+
+    expect(h1.syncTbl!.syncSize()).toBe(2);
+    expect(h1.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      name: 'Updated Test Record 1',
+      amount: 251177
+    });
+    expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(h2.syncTbl!.syncSize()).toBe(2);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      name: 'Updated Test Record 1',
+      amount: 251177
+    });
+    expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
+  test('Perform conflicting concurrent synchronization - change vs delete - laborious delete', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const h1 = await createVersionedTable<TstRecordType>();
+    await h1.addRecord(testRecord._id, testRecord);
+    const branchingCommitId = h1.lastCommitId();
+    const h2 = await createVersionedTable<TstRecordType>({
+      initialData: {
+        commitId: branchingCommitId,
+        data: h1.syncTbl!.syncGetRecords(),
+        idExtract
+      }
+    });
+    await h2.addRecord(testRecord2._id, testRecord2);
+    await h2.updateRecord(testRecord._id, {isTrue: false});
+    await h2.deleteRecord(testRecord._id);
+    await h1.updateRecord(testRecord._id, {amount: 251177});
+    const h2Delta = h2.getHistoryDelta(branchingCommitId);
+    const mergeDelta = await h1.mergeWith(h2Delta!);
+    await h2.applyMerge(mergeDelta!);
+
+    expect(h1.syncTbl!.syncSize()).toBe(2);
+    expect(h1.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 251177
+    });
+    expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(h2.syncTbl!.syncSize()).toBe(2);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 251177
+    });
+    expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
+  test('Synchronize after further changes since delta', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const h1 = await createVersionedTable<TstRecordType>();
+    await h1.addRecord(testRecord._id, testRecord);
+    const branchingCommitId = h1.lastCommitId();
+    const h2 = await createVersionedTable<TstRecordType>({
+      initialData: {
+        commitId: branchingCommitId,
+        data: h1.syncTbl!.syncGetRecords(),
+        idExtract
+      }
+    });
+    await h2.addRecord(testRecord2._id, testRecord2);
+    await h2.updateRecord(testRecord._id, {isTrue: false});
+    await h1.updateRecord(testRecord._id, {amount: 251177});
+    const h2Delta = h2.getHistoryDelta(branchingCommitId);
+    await h2.updateRecord(testRecord._id, {
+      amount: 140579,
+      when: new Date(2021, 7, 3)
+    });
+    const mergeDelta = await h1.mergeWith(h2Delta!);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 140579,
+      isTrue: false,
+      when: new Date(2021, 7, 3)
+    });
+    await h2.applyMerge(mergeDelta!);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 251177,
+      isTrue: false,
+      when: new Date(2021, 7, 3)
+    });
+
+    expect(h1.syncTbl!.syncSize()).toBe(2);
+    expect(h1.syncTbl!.syncGetRecord('TEST1')).toEqual({
+      ...testRecord,
+      amount: 251177,
+      isTrue: false
+    });
+    expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(h2.syncTbl!.syncSize()).toBe(2);
+    expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
   });
 });

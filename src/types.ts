@@ -94,15 +94,7 @@ export interface HistoryFullTableRefresh<RecordType> extends BaseHistoryEntry {
   sampleRows: RecordType[];
 }
 
-export const isTableRecordOperation = (
-  obj: any
-): obj is RecordChangeOperation<any> =>
-  obj &&
-  typeof obj === 'object' &&
-  obj.__typename &&
-  obj.__typename === HistoryOperationType.TABLE_RECORD_CHANGE;
-
-export interface TableHistoryLocal<RecordType> {
+export interface LocalVersionedTable<RecordType> {
   readonly tbl: ReadTable<RecordType>;
   readonly syncTbl: null | SyncReadTable<RecordType>;
   addRecord: (recordId: Id, record: RecordType) => Promise<RecordType>;
@@ -115,10 +107,13 @@ export interface TableHistoryLocal<RecordType> {
   firstCommitId: () => string;
   nextCommitIdOf: (commitId: string) => string | null;
   prevCommitIdOf: (commitId: string) => string | null;
+  branchVersionHistory: (
+    toCommitId?: string
+  ) => TableVersionHistory<RecordType>;
 }
 
 export interface HistoryTransaction<RecordType, ReturnType = any> {
-  (tblHistory: TableHistoryLocal<RecordType>): Promise<ReturnType>;
+  (tblHistory: LocalVersionedTable<RecordType>): Promise<ReturnType>;
 }
 
 export interface TableHistoryDelta<RecordType> {
@@ -127,27 +122,12 @@ export interface TableHistoryDelta<RecordType> {
   changes: TableRecordChange<RecordType>[];
 }
 
-export const isTableHistoryDelta = (obj: any): obj is TableHistoryDelta<any> =>
-  obj &&
-  typeof obj === 'object' &&
-  typeof obj.afterCommitId === 'string' &&
-  Array.isArray(obj.commitsIds) &&
-  Array.isArray(obj.changes);
-
 export interface TableMergeDelta<RecordType> {
   afterCommitId: string;
   mergedInCommitsIds: string[];
   existingCommitsIds: string[];
   changes: TableRecordChange<RecordType>[];
 }
-
-export const isTableMergeDelta = (obj: any): obj is TableMergeDelta<any> =>
-  obj &&
-  typeof obj === 'object' &&
-  typeof obj.afterCommitId === 'string' &&
-  Array.isArray(obj.mergedInCommitsIds) &&
-  Array.isArray(obj.existingCommitsIds) &&
-  Array.isArray(obj.changes);
 
 export interface HistoryMergeOperation<RecordType> extends BaseHistoryEntry {
   __typename: HistoryOperationType.HISTORY_MERGE_IN;
@@ -160,14 +140,80 @@ export type TableHistoryEntry<RecordType> =
   | HistoryFullTableRefresh<RecordType>
   | HistoryMergeOperation<RecordType>;
 
+export interface TableVersionMergeResult<RecordType> {
+  localChanges: TableRecordChange<RecordType>[];
+  mergeChanges: TableRecordChange<RecordType>[];
+  localCommitsIds: string[];
+  mergeCommitsIds: string[];
+}
+
+/**
+ * The table version history represents a potentially
+ * partial history of the changes to a table in a specific
+ * branch.
+ *
+ * The history only deals with a history of operations performed
+ * to a table, it does not directly affect the table with data
+ * it refers to.
+ *
+ * Objects of this class can determine what changes will be needed
+ * if we were to merge and rebase the history with external deltas.
+ *
+ */
+export interface TableVersionHistory<RecordType> {
+  entries: (
+    afterCommitId: string,
+    toCommitId?: string
+  ) => Iterable<TableHistoryEntry<RecordType>>;
+
+  readonly length: number;
+
+  push: (entry: TableHistoryEntry<RecordType>) => number;
+
+  clear: () => void;
+
+  indexOf: (commitId: string) => number;
+
+  getByIndex: (index: number) => TableHistoryEntry<RecordType>;
+
+  nextCommitIdOf: (commitId: string) => string | null;
+
+  previousCommitIdOf: (commitId: string) => string | null;
+
+  lastCommitId: () => string | null;
+
+  branch: (untilCommitId?: string) => TableVersionHistory<RecordType>;
+
+  getHistoryDelta: (
+    fromCommitId: string,
+    toCommitId?: string
+  ) => TableHistoryDelta<RecordType> | null;
+
+  mergeInRemoteDelta: (
+    historyDelta: TableMergeDelta<RecordType> | TableHistoryDelta<RecordType>
+  ) => null | TableVersionMergeResult<RecordType>;
+
+  rebaseWithMergeDelta: (
+    mergeDelta: TableMergeDelta<RecordType>
+  ) => TableRecordChange<RecordType>[];
+}
+
 export interface HistoryChannel<RecordType> {
   (delta: TableHistoryDelta<RecordType>): Promise<
     TableHistoryDelta<RecordType>
   >;
 }
 
-export interface TableHistory<RecordType>
-  extends TableHistoryLocal<RecordType> {
+/**
+ * Allows manipulating a table of data while keeping a history
+ * of the record level changes that happen to bring it to its current
+ * status.
+ *
+ * It also allows merging in deltas from external clients, and bringing
+ * the table back to a desired state from a remote merge result.
+ */
+export interface VersionedTable<RecordType>
+  extends LocalVersionedTable<RecordType> {
   refreshTable: (
     populationData: HistoryPopulationData<RecordType>
   ) => Promise<void>;
@@ -211,5 +257,28 @@ export interface TableHistoryFactory<RecordType> {
   (
     tableFactory: TableFactory<RecordType>,
     historyOptions: HistoryFactoryOptions<RecordType>
-  ): Promise<TableHistory<RecordType>>;
+  ): Promise<VersionedTable<RecordType>>;
 }
+
+export const isTableHistoryDelta = (obj: any): obj is TableHistoryDelta<any> =>
+  obj &&
+  typeof obj === 'object' &&
+  typeof obj.afterCommitId === 'string' &&
+  Array.isArray(obj.commitsIds) &&
+  Array.isArray(obj.changes);
+
+export const isTableMergeDelta = (obj: any): obj is TableMergeDelta<any> =>
+  obj &&
+  typeof obj === 'object' &&
+  typeof obj.afterCommitId === 'string' &&
+  Array.isArray(obj.mergedInCommitsIds) &&
+  Array.isArray(obj.existingCommitsIds) &&
+  Array.isArray(obj.changes);
+
+export const isTableRecordOperation = (
+  obj: any
+): obj is RecordChangeOperation<any> =>
+  obj &&
+  typeof obj === 'object' &&
+  obj.__typename &&
+  obj.__typename === HistoryOperationType.TABLE_RECORD_CHANGE;

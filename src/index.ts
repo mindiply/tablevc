@@ -1,6 +1,11 @@
-import {HistoryPopulationData, Id, TableFactory, TableHistoryFactory, TablePopulationData} from "./types";
-import {mapTableFactory} from "./MapTable";
-import {InMemoryHistoryFactory} from "./InMemoryHistory";
+import {
+  HistoryPopulationData,
+  Id,
+  TableFactory,
+  TableHistoryFactory
+} from './types';
+import {mapTableFactory} from './MapTable';
+import {InMemoryHistoryFactory} from './InMemoryHistory';
 
 export * from './types';
 
@@ -23,20 +28,24 @@ const dbTypeFactory = (dbType: DbType): TableFactory<any> => {
   if (dbType === DbType.memoryMap) {
     return mapTableFactory;
   }
-  throw new TypeError('Factory type unrecognized')
+  throw new TypeError('Factory type unrecognized');
 };
 
-const historyTypeFactory = (historyType: HistoryType): TableHistoryFactory<any> => {
+const historyTypeFactory = (
+  historyType: HistoryType
+): TableHistoryFactory<any> => {
   if (historyType === HistoryType.memoryHistory) {
     return InMemoryHistoryFactory;
   }
   throw new Error('History type not recognized');
 };
 
-export async function createHistory<RecordType>(options: CreateHistoryProps<RecordType> = {
-  historyType: HistoryType.memoryHistory,
-  dbType: DbType.memoryMap
-}) {
+export async function createVersionedTable<RecordType>(
+  options: CreateHistoryProps<RecordType> = {
+    historyType: HistoryType.memoryHistory,
+    dbType: DbType.memoryMap
+  }
+) {
   const {
     historyType = HistoryType.memoryHistory,
     dbType = DbType.memoryMap,
