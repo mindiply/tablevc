@@ -1,11 +1,21 @@
 import {
-  HistoryPopulationData,
+  VersionedTablePopulationData,
   Id,
   TableFactory,
-  VersionedTableFactory
+  TableHistoryFactory,
+  VersionedTable,
+  TableVersionHistory,
+  Table
 } from './types';
 import {mapTableFactory} from './MapTable';
-import {InMemoryHistoryFactory} from './InMemoryHistory';
+import {
+  createMappedVersioningHistoryList,
+  internalCreateVersionedTable
+} from './VersionedTable';
+export {
+  commitIdForOperation,
+  MemoryTableVersionHistory
+} from './VersionedTable';
 
 export * from './types';
 
@@ -13,16 +23,32 @@ export enum DbType {
   memoryMap
 }
 
-export enum HistoryType {
+export enum TableHistoryType {
   memoryHistory
 }
 
-interface CreateHistoryProps<RecordType> {
-  dbType?: DbType | TableFactory<RecordType>;
-  historyType?: HistoryType;
-  initialData?: HistoryPopulationData<RecordType>;
+interface BaseCreateVersionedTableProps<RecordType> {
+  dbType?: DbType | TableFactory<RecordType> | Table<RecordType>;
+  versionHistoryType?:
+    | TableHistoryType
+    | TableHistoryFactory<RecordType>
+    | TableVersionHistory<RecordType>;
   who?: Id;
 }
+
+interface CreateVersionedTablePropsWithData<RecordType>
+  extends BaseCreateVersionedTableProps<RecordType> {
+  initialData?: VersionedTablePopulationData<RecordType>;
+}
+
+interface CreateVersionedTablePropsFromCommit<RecordType>
+  extends BaseCreateVersionedTableProps<RecordType> {
+  fromCommitId?: string;
+}
+
+export type CreateVersionedTableProps<RecordType> =
+  | CreateVersionedTablePropsFromCommit<RecordType>
+  | CreateVersionedTablePropsWithData<RecordType>;
 
 const dbTypeFactory = (dbType: DbType): TableFactory<any> => {
   if (dbType === DbType.memoryMap) {
@@ -31,32 +57,54 @@ const dbTypeFactory = (dbType: DbType): TableFactory<any> => {
   throw new TypeError('Factory type unrecognized');
 };
 
-const historyTypeFactory = (
-  historyType: HistoryType
-): VersionedTableFactory<any> => {
-  if (historyType === HistoryType.memoryHistory) {
-    return InMemoryHistoryFactory;
+const tableHistoryFactoryForType = (
+  historyType: TableHistoryType
+): TableHistoryFactory<any> => {
+  if (historyType === TableHistoryType.memoryHistory) {
+    return createMappedVersioningHistoryList;
   }
   throw new Error('History type not recognized');
 };
 
 export async function createVersionedTable<RecordType>(
-  options: CreateHistoryProps<RecordType> = {
-    historyType: HistoryType.memoryHistory,
+  options: CreateVersionedTableProps<RecordType> = {
+    versionHistoryType: TableHistoryType.memoryHistory,
     dbType: DbType.memoryMap
   }
-) {
+): Promise<VersionedTable<RecordType>> {
   const {
-    historyType = HistoryType.memoryHistory,
+    versionHistoryType = TableHistoryType.memoryHistory,
     dbType = DbType.memoryMap,
-    initialData,
     who
   } = options;
   const dbFactory = typeof dbType === 'number' ? dbTypeFactory(dbType) : dbType;
-  const historyFactory = historyTypeFactory(historyType);
-  const history = await historyFactory(dbFactory, {
-    populationData: initialData,
+  const tableHistoryFactory =
+    typeof versionHistoryType === 'number'
+      ? (tableHistoryFactoryForType(
+          versionHistoryType
+        ) as TableHistoryFactory<RecordType>)
+      : versionHistoryType;
+  const fromCommitId = (options as CreateVersionedTablePropsFromCommit<RecordType>)
+    .fromCommitId;
+  const tableHistory =
+    typeof tableHistoryFactory === 'function'
+      ? await tableHistoryFactory({
+          who,
+          fromCommitId
+        })
+      : tableHistoryFactory;
+  const versionedTable = internalCreateVersionedTable({
+    tableHistory,
+    table: typeof dbFactory === 'function' ? dbFactory() : dbFactory,
     who
   });
-  return history;
+  if (
+    options &&
+    (options as CreateVersionedTablePropsWithData<RecordType>).initialData
+  ) {
+    await versionedTable.bulkLoad(
+      (options as CreateVersionedTablePropsWithData<RecordType>).initialData!
+    );
+  }
+  return versionedTable;
 }

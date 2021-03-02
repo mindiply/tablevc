@@ -170,6 +170,13 @@ export interface TableVersionHistory<RecordType> {
 
   push: (entry: TableHistoryEntry<RecordType>) => Promise<number>;
 
+  /**
+   * For storage backed version histories allows to load the latest changes
+   * that were saved tot he storage
+   * @returns {Promise<number>}
+   */
+  refreshFromStorage: () => Promise<number>;
+
   clear: () => void;
 
   indexOf: (commitId: string) => number;
@@ -198,10 +205,6 @@ export interface TableVersionHistory<RecordType> {
   ) => TableRecordChange<RecordType>[];
 }
 
-export interface TableVersionHistoryLoader<RecordType> {
-  (fromCommitId?: string): Promise<TableVersionHistory<RecordType>>;
-}
-
 export interface PushToServerChannel<RecordType> {
   (
     delta: TableHistoryDelta<RecordType>
@@ -222,8 +225,8 @@ export interface PullFromServerChannel<RecordType> {
  */
 export interface VersionedTable<RecordType>
   extends LocalVersionedTable<RecordType> {
-  refreshTable: (
-    populationData: HistoryPopulationData<RecordType>
+  bulkLoad: (
+    populationData: VersionedTablePopulationData<RecordType>
   ) => Promise<void>;
   tx: <ReturnType = any>(
     txBody: HistoryTransaction<RecordType, ReturnType>
@@ -247,16 +250,11 @@ export interface ClientVersionedTable<RecordType>
   readonly lastRemoteCommitId: null | string;
 }
 
-export interface GetRecordIdFn<RecordType> {
-  (record: RecordType): Id;
-}
-
 export interface TablePopulationData<RecordType> {
-  idExtract: GetRecordIdFn<RecordType>;
-  data: RecordType[];
+  data: Array<[Id, RecordType]>;
 }
 
-export interface HistoryPopulationData<RecordType>
+export interface VersionedTablePopulationData<RecordType>
   extends TablePopulationData<RecordType> {
   commitId: string;
 }
@@ -265,16 +263,16 @@ export interface TableFactory<RecordType> {
   (options?: TablePopulationData<RecordType>): Table<RecordType>;
 }
 
-export interface VersioningFactoryOptions<RecordType> {
-  who?: Id;
-  populationData?: HistoryPopulationData<RecordType>;
+export interface TableHistoryFactory<RecordType> {
+  (options?: TableHistoryFactoryOptions): Promise<
+    TableVersionHistory<RecordType>
+  >;
 }
 
-export interface VersionedTableFactory<RecordType> {
-  (
-    tableFactory: TableFactory<RecordType>,
-    historyOptions: VersioningFactoryOptions<RecordType>
-  ): Promise<VersionedTable<RecordType>>;
+export interface TableHistoryFactoryOptions {
+  who?: Id;
+  fromCommitId?: string;
+  // populationData?: HistoryPopulationData<RecordType>;
 }
 
 export const isTableHistoryDelta = (obj: any): obj is TableHistoryDelta<any> =>

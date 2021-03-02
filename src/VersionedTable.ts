@@ -2,18 +2,16 @@ import jsSHA from 'jssha';
 import {
   AddRecord,
   ChangeRecord,
-  VersioningFactoryOptions,
   HistoryInit,
   HistoryMergeOperation,
   HistoryOperationType,
-  HistoryPopulationData,
+  VersionedTablePopulationData,
   HistoryTransaction,
   Id,
   isTableHistoryDelta,
   isTableMergeDelta,
   RecordChangeOperation,
   Table,
-  TableFactory,
   TableHistoryDelta,
   TableHistoryEntry,
   TableMergeDelta,
@@ -21,9 +19,9 @@ import {
   TableRecordChange,
   TableTransactionBody,
   TableVersionHistory,
-  VersionedTable,
   WritableTable,
-  ClientVersionedTable
+  ClientVersionedTable,
+  TableHistoryFactoryOptions
 } from './types';
 
 interface HistoryCreationProps<RecordType> {
@@ -32,7 +30,7 @@ interface HistoryCreationProps<RecordType> {
   who?: Id;
 }
 
-function commitIdForOperation(
+export function commitIdForOperation(
   operation: Omit<TableHistoryEntry<any>, 'commitId'>
 ): string {
   const shaObj = new jsSHA('SHA-512', 'TEXT');
@@ -78,7 +76,13 @@ class HistoryEntriesIterator<RecordType>
   }
 }
 
-class MappedHistoriesEntriesList<RecordType>
+/**
+ * Memory only implementation of TableVersionHistory.
+ *
+ * Can be useful to extend from or as implementation object of
+ * other types of histories
+ */
+export class MemoryTableVersionHistory<RecordType>
   implements TableVersionHistory<RecordType> {
   private recordsList: TableHistoryEntry<RecordType>[];
   private recordsById: Map<string, number>;
@@ -92,10 +96,10 @@ class MappedHistoriesEntriesList<RecordType>
 
   public branch = (untilCommitId?: string) => {
     if (!untilCommitId) {
-      return new MappedHistoriesEntriesList([...this.recordsList]);
+      return new MemoryTableVersionHistory([...this.recordsList]);
     }
     const targetIndex = this.indexOf(untilCommitId);
-    return new MappedHistoriesEntriesList(
+    return new MemoryTableVersionHistory(
       targetIndex !== -1
         ? this.recordsList.slice(0, targetIndex + 1)
         : this.recordsList.slice()
@@ -105,6 +109,8 @@ class MappedHistoriesEntriesList<RecordType>
   public get length() {
     return this.recordsList.length;
   }
+
+  public refreshFromStorage = async () => this.recordsList.length;
 
   /**
    * Returns an iterator with all the history entries in the range
@@ -504,7 +510,8 @@ function operationsToReachState<RecordType>(
   return changesNeeded;
 }
 
-class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
+class VersionedTableImpl<RecordType>
+  implements ClientVersionedTable<RecordType> {
   private readonly table: Table<RecordType>;
   private historyEntries: TableVersionHistory<RecordType>;
   private readonly who?: Id;
@@ -630,17 +637,15 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
     return false;
   };
 
-  public refreshTable = async ({
+  public bulkLoad = async ({
     commitId,
-    data: allRecords,
-    idExtract
-  }: HistoryPopulationData<RecordType>) => {
+    data: allRecords
+  }: VersionedTablePopulationData<RecordType>) => {
     try {
       const existingIds = await this.table.allKeys();
       await this.writeToTbl(async tbl => {
         const updatedIds: Set<Id> = new Set();
-        for (const updatedRecord of allRecords) {
-          const recordId = idExtract(updatedRecord);
+        for (const [recordId, updatedRecord] of allRecords) {
           updatedIds.add(recordId);
           await tbl.setRecord(recordId, updatedRecord);
         }
@@ -653,7 +658,7 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
         this.historyEntries.clear();
         await this.historyEntries.push({
           __typename: HistoryOperationType.HISTORY_FULL_TABLE_REFRESH,
-          sampleRows,
+          sampleRows: sampleRows.map(row => row[1]),
           nRows: allRecords.length,
           when: new Date(),
           commitId,
@@ -811,22 +816,23 @@ class InMemoryHistory<RecordType> implements ClientVersionedTable<RecordType> {
     this.historyEntries.previousCommitIdOf(commitId);
 }
 
-export async function InMemoryHistoryFactory<RecordType>(
-  tableFactory: TableFactory<RecordType>,
-  {who, populationData}: VersioningFactoryOptions<RecordType>
-): Promise<VersionedTable<RecordType>> {
-  const table = tableFactory();
+export function internalCreateVersionedTable<RecordType>(
+  props: HistoryCreationProps<RecordType>
+) {
+  return new VersionedTableImpl(props);
+}
+
+export async function createMappedVersioningHistoryList<RecordType>(
+  options: TableHistoryFactoryOptions = {}
+) {
+  const {who, fromCommitId} = options;
   const initOp: Omit<HistoryInit, 'commitId'> = {
     __typename: HistoryOperationType.HISTORY_INIT,
     when: new Date(),
     who
   };
-  const tableHistory = new MappedHistoriesEntriesList<RecordType>([
-    {...initOp, commitId: commitIdForOperation({...initOp})}
+  const tableHistory = new MemoryTableVersionHistory<RecordType>([
+    {...initOp, commitId: fromCommitId || commitIdForOperation({...initOp})}
   ]);
-  const history = new InMemoryHistory({table, tableHistory, who});
-  if (populationData) {
-    await history.refreshTable(populationData);
-  }
-  return history;
+  return tableHistory;
 }

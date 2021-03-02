@@ -22,8 +22,8 @@ class MapTable<RecordType>
 
   constructor(populationData?: TablePopulationData<RecordType>) {
     if (populationData) {
-      const {data, idExtract} = populationData;
-      this.records = new Map(data.map(record => [idExtract(record), record]));
+      const {data} = populationData;
+      this.records = new Map(data);
     } else {
       this.records = new Map();
     }

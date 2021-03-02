@@ -19,10 +19,6 @@ const emptyTestRecord = (): TstRecordType => ({
   when: new Date()
 });
 
-function idExtract(record: TstRecordType): Id {
-  return record._id;
-}
-
 describe('Basic table interaction via history', () => {
   test('Table with empty history should have no records', async () => {
     const history = await createVersionedTable();
@@ -56,7 +52,7 @@ describe('Basic table interaction via history', () => {
     const nRecords = await history.tbl.size();
     const record = await history.tbl.getRecord('TEST1');
     expect(nRecords).toBe(2);
-    expect(record.name).toEqual('Test 1 is my name');
+    expect(record!.name).toEqual('Test 1 is my name');
   });
 
   test('Initialise with one record', async () => {
@@ -67,8 +63,7 @@ describe('Basic table interaction via history', () => {
     const history = await createVersionedTable({
       initialData: {
         commitId: 'TEST_COMMIT_ID',
-        idExtract: (record: TstRecordType) => record._id,
-        data: [testRecord]
+        data: [[testRecord._id, testRecord]]
       }
     });
     const nRecords = await history.tbl.size();
@@ -98,8 +93,11 @@ describe('Basic table interaction via history', () => {
     const history = await createVersionedTable({
       initialData: {
         commitId: 'TEST_COMMIT_ID',
-        idExtract: (record: TstRecordType) => record._id,
-        data: [testRecord, testRecord2, testRecord3]
+        data: [
+          [testRecord._id, testRecord],
+          [testRecord2._id, testRecord2],
+          [testRecord3._id, testRecord3]
+        ]
       }
     });
     const nRecords = await history.tbl.size();
@@ -123,8 +121,7 @@ describe('Basic table interaction via history', () => {
     const history = await createVersionedTable({
       initialData: {
         commitId: 'TEST_COMMIT_ID',
-        idExtract: (record: TstRecordType) => record._id,
-        data: [testRecord]
+        data: [[testRecord._id, testRecord]]
       }
     });
     await history.tx(async db => {
@@ -144,7 +141,7 @@ describe('Basic table interaction via history', () => {
     const tbl = history.syncTbl!;
     expect(tbl.syncGetRecord('TEST2')).toBe(undefined);
     expect(tbl.syncSize()).toBe(2);
-    expect(tbl.syncGetRecord('TEST1').name).toBe('Test 1 is my name');
+    expect(tbl.syncGetRecord('TEST1')!.name).toBe('Test 1 is my name');
   });
 });
 
@@ -189,8 +186,7 @@ describe('Merging different branches', () => {
     const h2 = await createVersionedTable<TstRecordType>({
       initialData: {
         commitId: h1.lastCommitId(),
-        data: [],
-        idExtract
+        data: []
       }
     });
     await h1.addRecord(testRecord._id, testRecord);
@@ -222,8 +218,7 @@ describe('Merging different branches', () => {
     const h2 = await createVersionedTable<TstRecordType>({
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords(),
-        idExtract
+        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
@@ -262,8 +257,7 @@ describe('Merging different branches', () => {
     const h2 = await createVersionedTable<TstRecordType>({
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords(),
-        idExtract
+        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
@@ -304,8 +298,7 @@ describe('Merging different branches', () => {
     const h2 = await createVersionedTable<TstRecordType>({
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords(),
-        idExtract
+        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
@@ -345,8 +338,7 @@ describe('Merging different branches', () => {
     const h2 = await createVersionedTable<TstRecordType>({
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords(),
-        idExtract
+        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
