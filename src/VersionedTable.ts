@@ -238,8 +238,8 @@ export class MemoryTableVersionHistory<RecordType>
           if (existingChange.__typename === TableOperationType.ADD_RECORD) {
             const updatedInsert: AddRecord<RecordType> = {
               ...existingChange,
-              record: {
-                ...existingChange.record,
+              row: {
+                ...existingChange.row,
                 ...change.changes
               }
             };
@@ -267,7 +267,7 @@ export class MemoryTableVersionHistory<RecordType>
             const updateRecord: ChangeRecord<RecordType> = {
               __typename: TableOperationType.CHANGE_RECORD,
               id: change.id,
-              changes: change.record,
+              changes: change.row,
               original: existingChange.original
             };
             cumulativeChangeByRecord.set(change.id, updateRecord);
@@ -451,16 +451,16 @@ function operationsToReachState<RecordType>(
         if (sourceChange.__typename === TableOperationType.ADD_RECORD) {
           changesNeeded.push({
             __typename: TableOperationType.CHANGE_RECORD,
-            changes: {...targetChange.record},
+            changes: {...targetChange.row},
             id: targetChange.id,
-            original: sourceChange.record
+            original: sourceChange.row
           });
         } else if (
           sourceChange.__typename === TableOperationType.CHANGE_RECORD
         ) {
           changesNeeded.push({
             __typename: TableOperationType.CHANGE_RECORD,
-            changes: targetChange.record,
+            changes: targetChange.row,
             id: targetChange.id,
             original: sourceChange.original
           });
@@ -478,7 +478,7 @@ function operationsToReachState<RecordType>(
         if (sourceChange.__typename === TableOperationType.DELETE_RECORD) {
           changesNeeded.push({
             __typename: TableOperationType.ADD_RECORD,
-            record: {...targetChange.original, ...targetChange.changes},
+            row: {...targetChange.original, ...targetChange.changes},
             id: targetChange.id
           });
         } else if (
@@ -495,7 +495,7 @@ function operationsToReachState<RecordType>(
             __typename: TableOperationType.CHANGE_RECORD,
             id: targetChange.id,
             changes: {...targetChange.original, ...targetChange.changes},
-            original: sourceChange.record
+            original: sourceChange.row
           });
         } else {
           // @ts-expect-error throw in the future id we add new types
@@ -556,7 +556,7 @@ class VersionedTableImpl<RecordType>
         __typename: HistoryOperationType.TABLE_RECORD_CHANGE,
         change: {
           __typename: TableOperationType.ADD_RECORD,
-          record,
+          row: record,
           id: recordId
         },
         when: new Date(),
@@ -748,7 +748,7 @@ class VersionedTableImpl<RecordType>
         } else if (
           recordOperation.__typename === TableOperationType.ADD_RECORD
         ) {
-          await tbl.setRecord(recordOperation.id, recordOperation.record);
+          await tbl.setRecord(recordOperation.id, recordOperation.row);
         }
       }
     });

@@ -1,7 +1,7 @@
 export type Id = number | string;
 
 export interface KeyFilter<RecordType> {
-  (record: RecordType): boolean;
+  (row: RecordType): boolean;
 }
 
 export interface SyncReadTable<RecordType> {
@@ -21,7 +21,7 @@ export interface ReadTable<RecordType> {
 }
 
 export interface WritableTable<RecordType> extends ReadTable<RecordType> {
-  setRecord: (key: Id, record: RecordType) => Promise<void>;
+  setRecord: (key: Id, row: RecordType) => Promise<void>;
   deleteRecord: (key: Id) => Promise<void>;
 }
 
@@ -58,7 +58,7 @@ export interface BaseHistoryEntry {
 export interface AddRecord<RecordType> {
   __typename: TableOperationType.ADD_RECORD;
   id: Id;
-  record: RecordType;
+  row: RecordType;
 }
 
 export interface ChangeRecord<RecordType> {
@@ -97,7 +97,7 @@ export interface HistoryFullTableRefresh<RecordType> extends BaseHistoryEntry {
 export interface LocalVersionedTable<RecordType> {
   readonly tbl: ReadTable<RecordType>;
   readonly syncTbl: null | SyncReadTable<RecordType>;
-  addRecord: (recordId: Id, record: RecordType) => Promise<RecordType>;
+  addRecord: (recordId: Id, row: RecordType) => Promise<RecordType>;
   updateRecord: (
     recordId: Id,
     recordChanges: Partial<RecordType>
