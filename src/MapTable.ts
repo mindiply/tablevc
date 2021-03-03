@@ -4,6 +4,7 @@
 
 import {
   Id,
+  isId,
   KeyFilter,
   SyncReadTable,
   Table,
@@ -11,6 +12,7 @@ import {
   TableTransactionBody,
   WritableTable
 } from './types';
+import {generateNewId} from './generateId';
 
 interface FullTableFunctionality<RecordType>
   extends Table<RecordType>,
@@ -19,8 +21,13 @@ interface FullTableFunctionality<RecordType>
 class MapTable<RecordType>
   implements FullTableFunctionality<RecordType>, SyncReadTable<RecordType> {
   private records: Map<Id, RecordType>;
+  private _primaryKey: keyof RecordType;
 
-  constructor(populationData?: TablePopulationData<RecordType>) {
+  constructor(
+    primaryKey: keyof RecordType,
+    populationData?: TablePopulationData<RecordType>
+  ) {
+    this._primaryKey = primaryKey;
     if (populationData) {
       const {data} = populationData;
       this.records = new Map(data);
@@ -31,6 +38,10 @@ class MapTable<RecordType>
 
   public get syncTbl() {
     return this;
+  }
+
+  public get primaryKey() {
+    return this._primaryKey;
   }
 
   public syncSize = () => this.records.size;
@@ -79,8 +90,25 @@ class MapTable<RecordType>
   public allKeys = async (filter?: (record: RecordType) => boolean) =>
     this.syncAllKeys(filter);
 
-  public setRecord = async (key: Id, record: RecordType) => {
-    this.records.set(key, record);
+  public setRecord = async (
+    key: Id | Partial<RecordType>,
+    record?: RecordType
+  ) => {
+    if (isId(key) && !record) {
+      throw new Error('We need an object to insert');
+    }
+    const recordId = isId(key)
+      ? key
+      : key && this._primaryKey in key
+      ? ((key[this._primaryKey] as unknown) as Id)
+      : generateNewId();
+    const element = isId(key)
+      ? record!
+      : this._primaryKey
+      ? key
+      : {...key, [this._primaryKey]: recordId};
+    this.records.set(recordId, element as RecordType);
+    return this.records.get(recordId)!;
   };
 
   public deleteRecord = async (key: Id) => {
@@ -105,5 +133,6 @@ class MapTable<RecordType>
 }
 
 export const mapTableFactory = <RecordType>(
+  primaryKey: keyof RecordType,
   options?: TablePopulationData<RecordType>
-): Table<RecordType> => new MapTable(options);
+): Table<RecordType> => new MapTable(primaryKey, options);

@@ -21,7 +21,9 @@ import {
   TableVersionHistory,
   WritableTable,
   ClientVersionedTable,
-  TableHistoryFactoryOptions
+  TableHistoryFactoryOptions,
+  isId,
+  VersionedTable
 } from './types';
 
 interface HistoryCreationProps<RecordType> {
@@ -549,28 +551,32 @@ class VersionedTableImpl<RecordType>
   public branchVersionHistory = (toCommitId?: string) =>
     this.historyEntries.branch(toCommitId);
 
-  public addRecord = async (recordId: Id, record: RecordType) => {
+  public addRecord = async (
+    recordId: Id | Partial<RecordType>,
+    record?: RecordType
+  ): Promise<RecordType> => {
     return this.writeToTbl(async tbl => {
-      await tbl.setRecord(recordId, record);
+      if (isId(recordId) && !record) {
+        throw new Error('Need a record to insert');
+      }
+      const addedRecord = await (isId(recordId)
+        ? tbl.setRecord(recordId, record!)
+        : tbl.setRecord(recordId));
       const addOp: Omit<RecordChangeOperation<RecordType>, 'commitId'> = {
         __typename: HistoryOperationType.TABLE_RECORD_CHANGE,
         change: {
           __typename: TableOperationType.ADD_RECORD,
-          row: record,
-          id: recordId
+          row: addedRecord,
+          id: (addedRecord[this.table.primaryKey] as unknown) as Id
         },
         when: new Date(),
         who: this.who
       };
-      const newRecord = await tbl.getRecord(recordId);
-      if (!newRecord) {
-        throw new Error('Unable to add new record in table');
-      }
       await this.historyEntries.push({
         ...addOp,
         commitId: commitIdForOperation(addOp)
       });
-      return newRecord;
+      return addedRecord;
     });
   };
 
@@ -818,7 +824,7 @@ class VersionedTableImpl<RecordType>
 
 export function internalCreateVersionedTable<RecordType>(
   props: HistoryCreationProps<RecordType>
-) {
+): VersionedTable<RecordType> {
   return new VersionedTableImpl(props);
 }
 

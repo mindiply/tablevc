@@ -1,4 +1,5 @@
-import {createVersionedTable, Id, TableOperationType} from '../src';
+import {Id, TableOperationType} from '../src';
+import {createVersionedTable} from '../src/factories';
 
 interface TstRecordType {
   _id: Id;
@@ -21,13 +22,13 @@ const emptyTestRecord = (): TstRecordType => ({
 
 describe('Basic table interaction via history', () => {
   test('Table with empty history should have no records', async () => {
-    const history = await createVersionedTable();
+    const history = await createVersionedTable({primaryKey: '_id'});
     const nRecords = await history.tbl.size();
     expect(nRecords).toBe(0);
   });
 
   test('Table with one record', async () => {
-    const history = await createVersionedTable();
+    const history = await createVersionedTable({primaryKey: '_id'});
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -40,7 +41,9 @@ describe('Basic table interaction via history', () => {
   });
 
   test('Table with two records, one being changed', async () => {
-    const history = await createVersionedTable<TstRecordType>();
+    const history = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id'
+    });
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -61,6 +64,7 @@ describe('Basic table interaction via history', () => {
       _id: 'TEST1'
     };
     const history = await createVersionedTable({
+      primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
         data: [[testRecord._id, testRecord]]
@@ -91,6 +95,7 @@ describe('Basic table interaction via history', () => {
       _id: 'TEST3'
     };
     const history = await createVersionedTable({
+      primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
         data: [
@@ -119,6 +124,7 @@ describe('Basic table interaction via history', () => {
       _id: 'TEST1'
     };
     const history = await createVersionedTable({
+      primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
         data: [[testRecord._id, testRecord]]
@@ -147,7 +153,9 @@ describe('Basic table interaction via history', () => {
 
 describe('Generating deltas', () => {
   test('Generate a straight forward delta', async () => {
-    const history = await createVersionedTable<TstRecordType>();
+    const history = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id'
+    });
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -159,7 +167,9 @@ describe('Generating deltas', () => {
   });
 
   test('Generate an empty delta', async () => {
-    const history = await createVersionedTable<TstRecordType>();
+    const history = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id'
+    });
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -182,8 +192,9 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>();
+    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
     const h2 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
       initialData: {
         commitId: h1.lastCommitId(),
         data: []
@@ -212,10 +223,11 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>();
+    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
         data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
@@ -251,10 +263,11 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>();
+    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
         data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
@@ -292,10 +305,11 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>();
+    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
         data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
@@ -332,10 +346,11 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>();
+    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
         data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])

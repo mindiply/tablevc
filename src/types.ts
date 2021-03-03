@@ -4,7 +4,13 @@ export interface KeyFilter<RecordType> {
   (row: RecordType): boolean;
 }
 
+export interface AddRecordFn<RecordType> {
+  (recordId: Id, row: RecordType): Promise<RecordType>;
+  (row: Partial<RecordType>): Promise<RecordType>;
+}
+
 export interface SyncReadTable<RecordType> {
+  readonly primaryKey: keyof RecordType;
   syncGetRecord: (key: Id) => RecordType | undefined;
   syncGetRecords: (keys?: Id[] | KeyFilter<RecordType>) => RecordType[];
   syncHasRecord: (key: Id) => boolean;
@@ -13,6 +19,7 @@ export interface SyncReadTable<RecordType> {
 }
 
 export interface ReadTable<RecordType> {
+  readonly primaryKey: keyof RecordType;
   getRecord: (key: Id) => Promise<RecordType | undefined>;
   getRecords: (keys?: Id[] | KeyFilter<RecordType>) => Promise<RecordType[]>;
   hasRecord: (key: Id) => Promise<boolean>;
@@ -21,7 +28,7 @@ export interface ReadTable<RecordType> {
 }
 
 export interface WritableTable<RecordType> extends ReadTable<RecordType> {
-  setRecord: (key: Id, row: RecordType) => Promise<void>;
+  setRecord: AddRecordFn<RecordType>;
   deleteRecord: (key: Id) => Promise<void>;
 }
 
@@ -97,7 +104,7 @@ export interface HistoryFullTableRefresh<RecordType> extends BaseHistoryEntry {
 export interface LocalVersionedTable<RecordType> {
   readonly tbl: ReadTable<RecordType>;
   readonly syncTbl: null | SyncReadTable<RecordType>;
-  addRecord: (recordId: Id, row: RecordType) => Promise<RecordType>;
+  addRecord: AddRecordFn<RecordType>;
   updateRecord: (
     recordId: Id,
     recordChanges: Partial<RecordType>
@@ -260,7 +267,10 @@ export interface VersionedTablePopulationData<RecordType>
 }
 
 export interface TableFactory<RecordType> {
-  (options?: TablePopulationData<RecordType>): Table<RecordType>;
+  (
+    primaryKey: keyof RecordType,
+    options?: TablePopulationData<RecordType>
+  ): Table<RecordType>;
 }
 
 export interface TableHistoryFactory<RecordType> {
@@ -274,6 +284,9 @@ export interface TableHistoryFactoryOptions {
   fromCommitId?: string;
   // populationData?: HistoryPopulationData<RecordType>;
 }
+
+export const isId = (obj: any): obj is Id =>
+  typeof obj === 'string' || typeof obj === 'number';
 
 export const isTableHistoryDelta = (obj: any): obj is TableHistoryDelta<any> =>
   obj &&
@@ -297,3 +310,35 @@ export const isTableRecordOperation = (
   typeof obj === 'object' &&
   obj.__typename &&
   obj.__typename === HistoryOperationType.TABLE_RECORD_CHANGE;
+
+export enum DbType {
+  memoryMap
+}
+
+export enum TableHistoryType {
+  memoryHistory
+}
+
+interface BaseCreateVersionedTableProps<RecordType> {
+  primaryKey: keyof RecordType;
+  dbType?: DbType | TableFactory<RecordType> | Table<RecordType>;
+  versionHistoryType?:
+    | TableHistoryType
+    | TableHistoryFactory<RecordType>
+    | TableVersionHistory<RecordType>;
+  who?: Id;
+}
+
+export interface CreateVersionedTablePropsWithData<RecordType>
+  extends BaseCreateVersionedTableProps<RecordType> {
+  initialData?: VersionedTablePopulationData<RecordType>;
+}
+
+export interface CreateVersionedTablePropsFromCommit<RecordType>
+  extends BaseCreateVersionedTableProps<RecordType> {
+  fromCommitId?: string;
+}
+
+export type CreateVersionedTableProps<RecordType> =
+  | CreateVersionedTablePropsFromCommit<RecordType>
+  | CreateVersionedTablePropsWithData<RecordType>;
