@@ -21,12 +21,15 @@ interface FullTableFunctionality<RecordType>
 class MapTable<RecordType>
   implements FullTableFunctionality<RecordType>, SyncReadTable<RecordType> {
   private records: Map<Id, RecordType>;
-  private _primaryKey: keyof RecordType;
+  private readonly _primaryKey: keyof RecordType;
+  private readonly _tableName: string;
 
   constructor(
+    tableName: string,
     primaryKey: keyof RecordType,
     populationData?: TablePopulationData<RecordType>
   ) {
+    this._tableName = tableName;
     this._primaryKey = primaryKey;
     if (populationData) {
       const {data} = populationData;
@@ -34,6 +37,10 @@ class MapTable<RecordType>
     } else {
       this.records = new Map();
     }
+  }
+
+  public get tableName() {
+    return this._tableName;
   }
 
   public get syncTbl() {
@@ -133,6 +140,7 @@ class MapTable<RecordType>
 }
 
 export const mapTableFactory = <RecordType>(
+  tableName: string,
   primaryKey: keyof RecordType,
   options?: TablePopulationData<RecordType>
-): Table<RecordType> => new MapTable(primaryKey, options);
+): Table<RecordType> => new MapTable(tableName, primaryKey, options);

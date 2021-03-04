@@ -10,6 +10,7 @@ export interface AddRecordFn<RecordType> {
 }
 
 export interface SyncReadTable<RecordType> {
+  readonly tableName: string;
   readonly primaryKey: keyof RecordType;
   syncGetRecord: (key: Id) => RecordType | undefined;
   syncGetRecords: (keys?: Id[] | KeyFilter<RecordType>) => RecordType[];
@@ -19,6 +20,7 @@ export interface SyncReadTable<RecordType> {
 }
 
 export interface ReadTable<RecordType> {
+  readonly tableName: string;
   readonly primaryKey: keyof RecordType;
   getRecord: (key: Id) => Promise<RecordType | undefined>;
   getRecords: (keys?: Id[] | KeyFilter<RecordType>) => Promise<RecordType[]>;
@@ -99,6 +101,10 @@ export interface HistoryFullTableRefresh<RecordType> extends BaseHistoryEntry {
   __typename: HistoryOperationType.HISTORY_FULL_TABLE_REFRESH;
   nRows: number;
   sampleRows: RecordType[];
+}
+
+export interface VersionedTableChangeListener<RecordType> {
+  (tablevc: VersionedTable<RecordType>): void;
 }
 
 export interface LocalVersionedTable<RecordType> {
@@ -212,6 +218,27 @@ export interface TableVersionHistory<RecordType> {
   ) => TableRecordChange<RecordType>[];
 }
 
+export interface VersionedTableCloneResult<RecordType> {
+  rows: RecordType[];
+  lastCommitId: string;
+}
+
+export interface VersionedTablesChannel {
+  pushChanges: <RecordType>(
+    tableName: string,
+    delta: TableHistoryDelta<RecordType>
+  ) => Promise<HistoryMergeOperation<RecordType>>;
+
+  pullChanges: <RecordType>(
+    tableName: string,
+    fromCommitId: string
+  ) => Promise<HistoryMergeOperation<RecordType>>;
+
+  cloneTable: <RecordType>(
+    tableName: string
+  ) => Promise<VersionedTableCloneResult<RecordType>>;
+}
+
 export interface PushToServerChannel<RecordType> {
   (
     delta: TableHistoryDelta<RecordType>
@@ -246,6 +273,13 @@ export interface VersionedTable<RecordType>
     historyDelta: TableHistoryDelta<RecordType>
   ) => Promise<HistoryMergeOperation<RecordType> | null>;
   applyMerge: (mergeDelta: HistoryMergeOperation<RecordType>) => Promise<void>;
+
+  subscribeToChanges: (
+    listener: VersionedTableChangeListener<RecordType>
+  ) => void;
+  unsubscribeFromChanges: (
+    listener: VersionedTableChangeListener<RecordType>
+  ) => void;
 }
 
 /**
@@ -268,15 +302,16 @@ export interface VersionedTablePopulationData<RecordType>
 
 export interface TableFactory<RecordType> {
   (
+    tableName: string,
     primaryKey: keyof RecordType,
     options?: TablePopulationData<RecordType>
   ): Table<RecordType>;
 }
 
 export interface TableHistoryFactory<RecordType> {
-  (options?: TableHistoryFactoryOptions): Promise<
-    TableVersionHistory<RecordType>
-  >;
+  (options?: TableHistoryFactoryOptions):
+    | TableVersionHistory<RecordType>
+    | Promise<TableVersionHistory<RecordType>>;
 }
 
 export interface TableHistoryFactoryOptions {
@@ -319,7 +354,8 @@ export enum TableHistoryType {
   memoryHistory
 }
 
-interface BaseCreateVersionedTableProps<RecordType> {
+export interface BaseCreateVersionedTableProps<RecordType> {
+  tableName: string;
   primaryKey: keyof RecordType;
   dbType?: DbType | TableFactory<RecordType> | Table<RecordType>;
   versionHistoryType?:
@@ -342,3 +378,9 @@ export interface CreateVersionedTablePropsFromCommit<RecordType>
 export type CreateVersionedTableProps<RecordType> =
   | CreateVersionedTablePropsFromCommit<RecordType>
   | CreateVersionedTablePropsWithData<RecordType>;
+
+export interface EmptyMemoryVersionedTableProps<RecordType> {
+  tableName: string;
+  primaryKey: keyof RecordType;
+  who?: Id;
+}

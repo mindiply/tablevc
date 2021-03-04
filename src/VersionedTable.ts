@@ -23,7 +23,8 @@ import {
   ClientVersionedTable,
   TableHistoryFactoryOptions,
   isId,
-  VersionedTable
+  VersionedTable,
+  VersionedTableChangeListener
 } from './types';
 
 interface HistoryCreationProps<RecordType> {
@@ -519,6 +520,7 @@ class VersionedTableImpl<RecordType>
   private readonly who?: Id;
   private inTxTbl: null | WritableTable<RecordType>;
   private _lastRemoteCommitId: null | string;
+  private readonly listeners: VersionedTableChangeListener<RecordType>[];
 
   constructor({table, tableHistory, who}: HistoryCreationProps<RecordType>) {
     this.who = who;
@@ -526,13 +528,36 @@ class VersionedTableImpl<RecordType>
     this.historyEntries = tableHistory;
     this.inTxTbl = null;
     this._lastRemoteCommitId = null;
+    this.listeners = [];
   }
 
   private writeToTbl = (body: TableTransactionBody<RecordType>) => {
     if (this.inTxTbl) {
       return body(this.inTxTbl);
     } else {
-      return this.table.tx(body);
+      return this.table.tx(async db => {
+        this.inTxTbl = db;
+        try {
+          const result = await body(db);
+          if (this.listeners.length > 0) {
+            new Promise(resolve => {
+              for (const listener of this.listeners) {
+                try {
+                  listener(this);
+                } catch (err) {
+                  // sorry, notification failed;
+                }
+              }
+              resolve(true);
+            })
+              .then()
+              .catch();
+          }
+          return result;
+        } finally {
+          this.inTxTbl = null;
+        }
+      });
     }
   };
 
@@ -679,14 +704,11 @@ class VersionedTableImpl<RecordType>
 
   public tx = async (txBody: HistoryTransaction<RecordType>) => {
     try {
-      const result = await this.tbl.tx(tbl => {
-        this.inTxTbl = tbl;
+      const result = await this.writeToTbl(() => {
         return txBody(this);
       });
-      this.inTxTbl = null;
       return result;
     } catch (err) {
-      this.inTxTbl = null;
       throw err;
     }
   };
@@ -820,6 +842,21 @@ class VersionedTableImpl<RecordType>
 
   public prevCommitIdOf = (commitId: string): string | null =>
     this.historyEntries.previousCommitIdOf(commitId);
+
+  public subscribeToChanges = (
+    listener: VersionedTableChangeListener<RecordType>
+  ) => {
+    this.listeners.push(listener);
+  };
+
+  public unsubscribeFromChanges = (
+    listener: VersionedTableChangeListener<RecordType>
+  ) => {
+    const index = this.listeners.indexOf(listener);
+    if (index !== -1) {
+      this.listeners.splice(index, 1);
+    }
+  };
 }
 
 export function internalCreateVersionedTable<RecordType>(
@@ -828,9 +865,9 @@ export function internalCreateVersionedTable<RecordType>(
   return new VersionedTableImpl(props);
 }
 
-export async function createMappedVersioningHistoryList<RecordType>(
+export function createMappedVersioningHistoryList<RecordType>(
   options: TableHistoryFactoryOptions = {}
-) {
+): TableVersionHistory<RecordType> {
   const {who, fromCommitId} = options;
   const initOp: Omit<HistoryInit, 'commitId'> = {
     __typename: HistoryOperationType.HISTORY_INIT,

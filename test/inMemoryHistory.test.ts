@@ -1,4 +1,4 @@
-import {Id, TableOperationType} from '../src';
+import {Id, TableOperationType, VersionedTableChangeListener} from '../src';
 import {createVersionedTable} from '../src/factories';
 
 interface TstRecordType {
@@ -20,15 +20,37 @@ const emptyTestRecord = (): TstRecordType => ({
   when: new Date()
 });
 
+class Counter {
+  private _counts: number[];
+
+  constructor(initialCount?: number) {
+    this._counts = typeof initialCount === 'number' ? [initialCount] : [];
+  }
+
+  public setCount(count: number) {
+    this._counts.push(count);
+  }
+
+  public get counts(): number[] {
+    return this._counts;
+  }
+}
+
 describe('Basic table interaction via history', () => {
   test('Table with empty history should have no records', async () => {
-    const history = await createVersionedTable({primaryKey: '_id'});
+    const history = await createVersionedTable({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     const nRecords = await history.tbl.size();
     expect(nRecords).toBe(0);
   });
 
   test('Table with one record', async () => {
-    const history = await createVersionedTable({primaryKey: '_id'});
+    const history = await createVersionedTable({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     const testRecord = {
       ...emptyTestRecord(),
       _id: 'TEST1'
@@ -42,7 +64,8 @@ describe('Basic table interaction via history', () => {
 
   test('Table with two records, one being changed', async () => {
     const history = await createVersionedTable<TstRecordType>({
-      primaryKey: '_id'
+      primaryKey: '_id',
+      tableName: 'Tst'
     });
     const testRecord = {
       ...emptyTestRecord(),
@@ -64,6 +87,7 @@ describe('Basic table interaction via history', () => {
       _id: 'TEST1'
     };
     const history = await createVersionedTable({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
@@ -95,6 +119,7 @@ describe('Basic table interaction via history', () => {
       _id: 'TEST3'
     };
     const history = await createVersionedTable({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
@@ -124,6 +149,7 @@ describe('Basic table interaction via history', () => {
       _id: 'TEST1'
     };
     const history = await createVersionedTable({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
@@ -154,6 +180,7 @@ describe('Basic table interaction via history', () => {
 describe('Generating deltas', () => {
   test('Generate a straight forward delta', async () => {
     const history = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id'
     });
     const testRecord = {
@@ -168,6 +195,7 @@ describe('Generating deltas', () => {
 
   test('Generate an empty delta', async () => {
     const history = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id'
     });
     const testRecord = {
@@ -192,8 +220,12 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
+    const h1 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     const h2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: h1.lastCommitId(),
@@ -223,10 +255,14 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
+    const h1 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
@@ -263,10 +299,14 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
+    const h1 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
@@ -305,10 +345,14 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
+    const h1 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
@@ -346,10 +390,14 @@ describe('Merging different branches', () => {
       ...emptyTestRecord(),
       _id: 'TEST2'
     };
-    const h1 = await createVersionedTable<TstRecordType>({primaryKey: '_id'});
+    const h1 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
     await h1.addRecord(testRecord._id, testRecord);
     const branchingCommitId = h1.lastCommitId();
     const h2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
@@ -388,5 +436,35 @@ describe('Merging different branches', () => {
     expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
     expect(h2.syncTbl!.syncSize()).toBe(2);
     expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
+  describe('Change listeners', () => {
+    test('basicListening', async () => {
+      const sizeCount = new Counter();
+      const testListener: VersionedTableChangeListener<TstRecordType> = tvc => {
+        sizeCount.setCount(tvc.syncTbl!.syncSize());
+      };
+      const testRecord = {
+        ...emptyTestRecord(),
+        _id: 'TEST1'
+      };
+      const testRecord2 = {
+        ...emptyTestRecord(),
+        _id: 'TEST2'
+      };
+      const h1 = await createVersionedTable<TstRecordType>({
+        primaryKey: '_id',
+        tableName: 'Tst'
+      });
+      h1.subscribeToChanges(testListener);
+      await h1.addRecord(testRecord._id, testRecord);
+      await h1.updateRecord(testRecord._id, {amount: 251177});
+      await h1.addRecord(testRecord2);
+      await h1.tx(async db => {
+        await db.deleteRecord(testRecord._id);
+        await db.deleteRecord(testRecord2._id);
+      });
+      expect(await (async () => sizeCount.counts)()).toEqual([1, 1, 2, 0]);
+    });
   });
 });
