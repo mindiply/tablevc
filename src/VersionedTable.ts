@@ -20,7 +20,6 @@ import {
   TableTransactionBody,
   TableVersionHistory,
   WritableTable,
-  ClientVersionedTable,
   TableHistoryFactoryOptions,
   isId,
   VersionedTable,
@@ -344,9 +343,7 @@ export class MemoryTableVersionHistory<RecordType>
   ): TableRecordChange<RecordType>[] => {
     const {changes, afterCommitId, mergedInCommitsIds} = mergeDelta;
     const localDelta = this.getHistoryDelta(afterCommitId);
-    if (!localDelta) {
-      return [];
-    }
+    const localChanges = localDelta ? localDelta.changes : [];
     let lastMergedCommitId: string | null = null;
     for (let i = mergedInCommitsIds.length - 1; i >= 0; i--) {
       if (this.indexOf(mergedInCommitsIds[i]) !== -1) {
@@ -354,18 +351,17 @@ export class MemoryTableVersionHistory<RecordType>
         break;
       }
     }
-    if (!lastMergedCommitId) {
-      return [];
-    }
-    const afterMergeDelta = this.getHistoryDelta(lastMergedCommitId);
+    const afterMergeDelta = lastMergedCommitId
+      ? this.getHistoryDelta(lastMergedCommitId)
+      : null;
     if (afterMergeDelta) {
       const {mergeChanges: desiredChanges} = mergeInDeltaChanges(
         changes,
         afterMergeDelta.changes
       );
-      return operationsToReachState(desiredChanges, localDelta.changes);
+      return operationsToReachState(desiredChanges, localChanges);
     } else {
-      return operationsToReachState(changes, localDelta.changes);
+      return operationsToReachState(changes, localChanges);
     }
     const rebaseChanges: TableRecordChange<RecordType>[] = [];
     return rebaseChanges;
@@ -513,8 +509,7 @@ function operationsToReachState<RecordType>(
   return changesNeeded;
 }
 
-class VersionedTableImpl<RecordType>
-  implements ClientVersionedTable<RecordType> {
+class VersionedTableImpl<RecordType> implements VersionedTable<RecordType> {
   private readonly table: Table<RecordType>;
   private historyEntries: TableVersionHistory<RecordType>;
   private readonly who?: Id;

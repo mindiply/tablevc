@@ -1,14 +1,16 @@
 import {
   BaseCreateVersionedTableProps,
-  ClientVersionedTable,
   HistoryMergeOperation,
+  HistoryOperationType,
+  TableHistoryDelta,
   VersionedTable,
+  VersionedTableCloneResult,
   VersionedTablesChannel
 } from './types';
 import {emptyVersionedTable} from './factories';
 
 export async function push<RecordType>(
-  versionedTable: ClientVersionedTable<RecordType>,
+  versionedTable: VersionedTable<RecordType>,
   channel: VersionedTablesChannel
 ): Promise<void> {
   try {
@@ -36,7 +38,7 @@ export async function push<RecordType>(
 }
 
 export async function pull<RecordType>(
-  versionedTable: ClientVersionedTable<RecordType>,
+  versionedTable: VersionedTable<RecordType>,
   channel: VersionedTablesChannel
 ): Promise<HistoryMergeOperation<RecordType> | null> {
   try {
@@ -85,3 +87,70 @@ export async function cloneTable<RecordType>(
   }
   return versionedTable;
 }
+
+class InMemoryVTChannel implements VersionedTablesChannel {
+  private _serverVersionedTable: VersionedTable<any>;
+
+  constructor(serverVT: VersionedTable<any>) {
+    this._serverVersionedTable = serverVT;
+  }
+
+  pushChanges = async <RecordType>(
+    tableName: string,
+    delta: TableHistoryDelta<RecordType>
+  ) => {
+    if (tableName !== this._serverVersionedTable.tbl.tableName) {
+      throw new Error(
+        `This channel is for table ${this._serverVersionedTable.tbl.tableName} only`
+      );
+    }
+    const mergeRes = await this._serverVersionedTable.mergeWith(delta);
+    return mergeRes;
+  };
+
+  pullChanges = async <RecordType>(tableName: string, fromCommitId: string) => {
+    if (tableName !== this._serverVersionedTable.tbl.tableName) {
+      throw new Error(
+        `This channel is for table ${this._serverVersionedTable.tbl.tableName} only`
+      );
+    }
+    const delta = await this._serverVersionedTable.getHistoryDelta(
+      fromCommitId
+    );
+    if (delta) {
+      const mergeRes: HistoryMergeOperation<any> = {
+        __typename: HistoryOperationType.HISTORY_MERGE_IN,
+        when: new Date(),
+        mergeDelta: {
+          afterCommitId: fromCommitId,
+          mergedInCommitsIds: [],
+          existingCommitsIds: delta.commitsIds,
+          changes: delta.changes
+        },
+        commitId: this._serverVersionedTable.lastCommitId()
+      };
+      return mergeRes as HistoryMergeOperation<RecordType>;
+    }
+    return null;
+  };
+
+  cloneTable = async <RecordType>(tableName: string) => {
+    if (tableName !== this._serverVersionedTable.tbl.tableName) {
+      throw new Error(
+        `This channel is for table ${this._serverVersionedTable.tbl.tableName} only`
+      );
+    }
+    const commitId = this._serverVersionedTable.lastCommitId();
+    const allRecords = await this._serverVersionedTable.tbl.getRecords();
+    return {
+      rows: allRecords,
+      lastCommitId: commitId
+    } as VersionedTableCloneResult<RecordType>;
+  };
+}
+
+export const createInMemoryVTChannel = (
+  serverVersionedTable: VersionedTable<any>
+): VersionedTablesChannel => {
+  return new InMemoryVTChannel(serverVersionedTable);
+};

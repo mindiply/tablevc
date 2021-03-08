@@ -227,26 +227,16 @@ export interface VersionedTablesChannel {
   pushChanges: <RecordType>(
     tableName: string,
     delta: TableHistoryDelta<RecordType>
-  ) => Promise<HistoryMergeOperation<RecordType>>;
+  ) => Promise<HistoryMergeOperation<RecordType> | null>;
 
   pullChanges: <RecordType>(
     tableName: string,
     fromCommitId: string
-  ) => Promise<HistoryMergeOperation<RecordType>>;
+  ) => Promise<HistoryMergeOperation<RecordType> | null>;
 
   cloneTable: <RecordType>(
     tableName: string
   ) => Promise<VersionedTableCloneResult<RecordType>>;
-}
-
-export interface PushToServerChannel<RecordType> {
-  (
-    delta: TableHistoryDelta<RecordType>
-  ): Promise<HistoryMergeOperation<RecordType> | null>;
-}
-
-export interface PullFromServerChannel<RecordType> {
-  (mergeDelta: HistoryMergeOperation<RecordType>): Promise<void>;
 }
 
 /**
@@ -280,14 +270,11 @@ export interface VersionedTable<RecordType>
   unsubscribeFromChanges: (
     listener: VersionedTableChangeListener<RecordType>
   ) => void;
-}
 
-/**
- * Represents the last commitId we synchronized via a merge or on initial data
- * load from the server.
- */
-export interface ClientVersionedTable<RecordType>
-  extends VersionedTable<RecordType> {
+  /**
+   * Represents the last commitId we synchronized via a merge or on initial data
+   * load from the server.
+   */
   readonly lastRemoteCommitId: null | string;
 }
 

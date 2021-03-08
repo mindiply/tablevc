@@ -7,3 +7,9 @@ export {
 export {generateNewId} from './generateId';
 export {createVersionedTable, emptyMemoryVersionTable} from './factories';
 export {mapTableFactory} from './MapTable';
+export {
+  cloneTable,
+  createInMemoryVTChannel,
+  pull,
+  push
+} from './synchronization';
