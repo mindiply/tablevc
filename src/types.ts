@@ -292,7 +292,7 @@ export interface ClientVersionedTable<RecordType>
 }
 
 export interface TablePopulationData<RecordType> {
-  data: Array<[Id, RecordType]>;
+  data: RecordType[];
 }
 
 export interface VersionedTablePopulationData<RecordType>

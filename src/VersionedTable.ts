@@ -676,7 +676,10 @@ class VersionedTableImpl<RecordType>
       const existingIds = await this.table.allKeys();
       await this.writeToTbl(async tbl => {
         const updatedIds: Set<Id> = new Set();
-        for (const [recordId, updatedRecord] of allRecords) {
+        for (const updatedRecord of allRecords) {
+          const recordId = (updatedRecord[
+            this.tbl.primaryKey
+          ] as unknown) as Id;
           updatedIds.add(recordId);
           await tbl.setRecord(recordId, updatedRecord);
         }
@@ -689,7 +692,7 @@ class VersionedTableImpl<RecordType>
         this.historyEntries.clear();
         await this.historyEntries.push({
           __typename: HistoryOperationType.HISTORY_FULL_TABLE_REFRESH,
-          sampleRows: sampleRows.map(row => row[1]),
+          sampleRows,
           nRows: allRecords.length,
           when: new Date(),
           commitId,

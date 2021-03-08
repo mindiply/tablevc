@@ -91,7 +91,7 @@ describe('Basic table interaction via history', () => {
       primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
-        data: [[testRecord._id, testRecord]]
+        data: [testRecord]
       }
     });
     const nRecords = await history.tbl.size();
@@ -123,11 +123,7 @@ describe('Basic table interaction via history', () => {
       primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
-        data: [
-          [testRecord._id, testRecord],
-          [testRecord2._id, testRecord2],
-          [testRecord3._id, testRecord3]
-        ]
+        data: [testRecord, testRecord2, testRecord3]
       }
     });
     const nRecords = await history.tbl.size();
@@ -153,7 +149,7 @@ describe('Basic table interaction via history', () => {
       primaryKey: '_id',
       initialData: {
         commitId: 'TEST_COMMIT_ID',
-        data: [[testRecord._id, testRecord]]
+        data: [testRecord]
       }
     });
     await history.tx(async db => {
@@ -266,7 +262,7 @@ describe('Merging different branches', () => {
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
+        data: h1.syncTbl!.syncGetRecords()
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
@@ -310,7 +306,7 @@ describe('Merging different branches', () => {
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
+        data: h1.syncTbl!.syncGetRecords()
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
@@ -356,7 +352,7 @@ describe('Merging different branches', () => {
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
+        data: h1.syncTbl!.syncGetRecords()
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);
@@ -401,7 +397,7 @@ describe('Merging different branches', () => {
       primaryKey: '_id',
       initialData: {
         commitId: branchingCommitId,
-        data: h1.syncTbl!.syncGetRecords().map(r => [r._id, r])
+        data: h1.syncTbl!.syncGetRecords()
       }
     });
     await h2.addRecord(testRecord2._id, testRecord2);

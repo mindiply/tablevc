@@ -33,7 +33,9 @@ class MapTable<RecordType>
     this._primaryKey = primaryKey;
     if (populationData) {
       const {data} = populationData;
-      this.records = new Map(data);
+      this.records = new Map(
+        data.map(row => [(row[primaryKey] as unknown) as Id, row])
+      );
     } else {
       this.records = new Map();
     }

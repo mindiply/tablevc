@@ -2,7 +2,6 @@ import {
   BaseCreateVersionedTableProps,
   ClientVersionedTable,
   HistoryMergeOperation,
-  Id,
   VersionedTable,
   VersionedTablesChannel
 } from './types';
@@ -55,10 +54,7 @@ export async function pull<RecordType>(
         versionedTable.tbl.tableName
       );
       await versionedTable.bulkLoad({
-        data: res.rows.map(row => [
-          (row[versionedTable.tbl.primaryKey] as unknown) as Id,
-          row
-        ]),
+        data: res.rows,
         commitId: res.lastCommitId
       });
     }
@@ -83,10 +79,7 @@ export async function cloneTable<RecordType>(
   ]);
   if (initialData.rows.length > 0) {
     await versionedTable.bulkLoad({
-      data: initialData.rows.map(row => [
-        (row[props.primaryKey] as unknown) as Id,
-        row
-      ]),
+      data: initialData.rows,
       commitId: initialData.lastCommitId
     });
   }
