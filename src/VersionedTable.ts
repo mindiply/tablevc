@@ -308,11 +308,9 @@ export class MemoryTableVersionHistory<RecordType>
       return null;
     }
     const localDelta = this.getHistoryDelta(afterCommitId);
-    if (!localDelta) {
-      return null;
-    }
+    const myChanges = localDelta ? localDelta.changes : [];
     const {mergeChanges, localChanges} = mergeInDeltaChanges(
-      localDelta.changes,
+      myChanges,
       historyDelta.changes
     );
     const mergeCommitsIds: string[] = isTableMergeDelta(historyDelta)
@@ -324,7 +322,7 @@ export class MemoryTableVersionHistory<RecordType>
     return {
       localChanges,
       mergeChanges,
-      localCommitsIds: localDelta.commitsIds,
+      localCommitsIds: localDelta ? localDelta.commitsIds : [],
       mergeCommitsIds
     };
   };

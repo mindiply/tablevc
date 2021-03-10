@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+# [0.0.4] - 2021-03-10
+
+- Fixed error when pushing changes to unchanged server resulting
+in failed merge.
+
 # [0.0.3] - 2021-03-08
 
 ## Added

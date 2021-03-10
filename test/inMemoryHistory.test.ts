@@ -242,6 +242,41 @@ describe('Merging different branches', () => {
     expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
   });
 
+  test('Perform not conflicting remote synchronization', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const h1 = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
+    const h2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: h1.lastCommitId(),
+        data: []
+      }
+    });
+    await h2.addRecord(testRecord._id, testRecord);
+    await h2.addRecord(testRecord2._id, testRecord2);
+    const h2Delta = h2.getHistoryDelta(h1.firstCommitId());
+    const mergeDelta = await h1.mergeWith(h2Delta!);
+    await h2.applyMerge(mergeDelta!);
+
+    expect(h1.syncTbl!.syncSize()).toBe(2);
+    expect(h1.syncTbl!.syncGetRecord('TEST1')).toEqual(testRecord);
+    expect(h1.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(h2.syncTbl!.syncSize()).toBe(2);
+    expect(h2.syncTbl!.syncGetRecord('TEST1')).toEqual(testRecord);
+    expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
   test('Perform conflicting concurrent synchronization - change vs delete', async () => {
     const testRecord = {
       ...emptyTestRecord(),
