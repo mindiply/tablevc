@@ -9,9 +9,29 @@ import {
 } from './types';
 import {emptyVersionedTable} from './factories';
 
+interface WasCancelledGetter {
+  (): boolean;
+}
+
+function defaultWasCancelled() {
+  return false;
+}
+
+/**
+ * Pushes local changes (if any) from the local history passed as
+ * parameter to the server using the provided channel, and merges
+ * in the resulting mergeResult once the response from the server
+ * was received.
+ *
+ * @param {VersionedTable<RecordType>} versionedTable
+ * @param {VersionedTablesChannel} channel
+ * @param {WasCancelledGetter} wasCancelled
+ * @returns {Promise<void>}
+ */
 export async function push<RecordType>(
   versionedTable: VersionedTable<RecordType>,
-  channel: VersionedTablesChannel
+  channel: VersionedTablesChannel,
+  wasCancelled: WasCancelledGetter = defaultWasCancelled
 ): Promise<void> {
   try {
     if (versionedTable.lastRemoteCommitId === null) {
@@ -27,7 +47,7 @@ export async function push<RecordType>(
       versionedTable.tbl.tableName,
       delta
     );
-    if (mergeDelta) {
+    if (mergeDelta && !wasCancelled()) {
       await versionedTable.applyMerge(mergeDelta);
     }
     return;
@@ -37,9 +57,19 @@ export async function push<RecordType>(
   }
 }
 
+/**
+ * Checks with the server if any changes happend since the lastRemoteCommitId,
+ * and applies them if they exist
+ *
+ * @param {VersionedTable<RecordType>} versionedTable
+ * @param {VersionedTablesChannel} channel
+ * @param {WasCancelledGetter} wasCancelled
+ * @returns {Promise<HistoryMergeOperation<RecordType> | null>}
+ */
 export async function pull<RecordType>(
   versionedTable: VersionedTable<RecordType>,
-  channel: VersionedTablesChannel
+  channel: VersionedTablesChannel,
+  wasCancelled: WasCancelledGetter = defaultWasCancelled
 ): Promise<HistoryMergeOperation<RecordType> | null> {
   try {
     const lastCommitId = versionedTable.lastRemoteCommitId;
@@ -48,17 +78,19 @@ export async function pull<RecordType>(
         versionedTable.tbl.tableName,
         lastCommitId
       );
-      if (mergeOp) {
+      if (mergeOp && !wasCancelled()) {
         await versionedTable.applyMerge(mergeOp);
       }
     } else {
       const res = await channel.cloneTable<RecordType>(
         versionedTable.tbl.tableName
       );
-      await versionedTable.bulkLoad({
-        data: res.rows,
-        commitId: res.lastCommitId
-      });
+      if (!wasCancelled()) {
+        await versionedTable.bulkLoad({
+          data: res.rows,
+          commitId: res.lastCommitId
+        });
+      }
     }
   } catch (err) {
     // noop
@@ -71,6 +103,14 @@ export interface CloneTableProps<RecordType>
   fromCommitId: string;
 }
 
+/**
+ * Creates a new versioned table using the entire table
+ * contents retrieved from the server.
+ *
+ * @param {CloneTableProps<RecordType>} props
+ * @param {VersionedTablesChannel} channel
+ * @returns {Promise<VersionedTable<RecordType>>}
+ */
 export async function cloneTable<RecordType>(
   props: CloneTableProps<RecordType>,
   channel: VersionedTablesChannel

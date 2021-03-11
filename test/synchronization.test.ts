@@ -100,6 +100,41 @@ describe('Push', () => {
     expect(h2.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
   });
 
+  test('Psuh with cancelled merge', async () => {
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    const testRecord2 = {
+      ...emptyTestRecord(),
+      _id: 'TEST2'
+    };
+    const server = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
+    const channel = createInMemoryVTChannel(server);
+    const {lastCommitId, rows} = await channel.cloneTable<TstRecordType>('Tst');
+    const client = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    await server.addRecord(testRecord._id, testRecord);
+    await client.addRecord(testRecord2._id, testRecord2);
+    await push(client, channel, () => true);
+
+    expect(server.syncTbl!.syncSize()).toBe(2);
+    expect(server.syncTbl!.syncGetRecord('TEST1')).toEqual(testRecord);
+    expect(server.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+    expect(client.syncTbl!.syncSize()).toBe(1);
+    expect(client.syncTbl!.syncGetRecord('TEST1')).toBe(undefined);
+    expect(client.syncTbl!.syncGetRecord('TEST2')).toEqual(testRecord2);
+  });
+
   test('Perform conflicting concurrent synchronization - change vs delete', async () => {
     const testRecord = {
       ...emptyTestRecord(),
@@ -195,6 +230,86 @@ describe('Pull', () => {
     expect(h2.syncTbl!.syncSize()).toBe(2);
     expect(h2.syncTbl!.syncGetRecord('TEST1')!).toEqual(
       h1.syncTbl!.syncGetRecord('TEST1')!
+    );
+  });
+
+  test('Changes from other client to pull', async () => {
+    const server = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
+    const channel = createInMemoryVTChannel(server);
+    const {lastCommitId, rows} = await channel.cloneTable<TstRecordType>('Tst');
+    const client1 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    const client2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    await client1.addRecord(testRecord);
+    await push(client1, channel);
+    await pull(client2, channel);
+    await client2.updateRecord('TEST1', {amount: 998});
+    await push(client2, channel);
+    await pull(client1, channel);
+    expect(client1.syncTbl!.syncSize()).toBe(1);
+    expect(client2.syncTbl!.syncSize()).toBe(1);
+    expect(client1.syncTbl!.syncGetRecord('TEST1')).toEqual(
+      client2.syncTbl!.syncGetRecord('TEST1')
+    );
+  });
+
+  test('Cancelled merge pull', async () => {
+    const server = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'Tst'
+    });
+    const channel = createInMemoryVTChannel(server);
+    const {lastCommitId, rows} = await channel.cloneTable<TstRecordType>('Tst');
+    const client1 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    const client2 = await createVersionedTable<TstRecordType>({
+      tableName: 'Tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    const testRecord = {
+      ...emptyTestRecord(),
+      _id: 'TEST1'
+    };
+    await client1.addRecord(testRecord);
+    await push(client1, channel);
+    await pull(client2, channel);
+    await client2.updateRecord('TEST1', {amount: 998});
+    await push(client2, channel);
+    await pull(client1, channel, () => true);
+    expect(client1.syncTbl!.syncSize()).toBe(1);
+    expect(client2.syncTbl!.syncSize()).toBe(1);
+    expect(client1.syncTbl!.syncGetRecord('TEST1')!.amount).not.toEqual(
+      client2.syncTbl!.syncGetRecord('TEST1')!.amount
     );
   });
 });
