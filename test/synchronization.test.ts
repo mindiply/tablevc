@@ -25,6 +25,8 @@ const emptyTestRecord = (): TstRecordType => ({
   when: new Date()
 });
 
+const tstRecord = (id: Id): TstRecordType => ({...emptyTestRecord(), _id: id});
+
 describe('Clone from server', () => {
   test('Empty history', async () => {
     const serverHistory = await createVersionedTable<TstRecordType>({
@@ -311,5 +313,46 @@ describe('Pull', () => {
     expect(client1.syncTbl!.syncGetRecord('TEST1')!.amount).not.toEqual(
       client2.syncTbl!.syncGetRecord('TEST1')!.amount
     );
+  });
+});
+
+describe('Dealing with multiple clients', () => {
+  test('Clients updating separate records', async () => {
+    const testRecord1 = tstRecord('TEST1');
+    const testRecord2 = tstRecord('TEST2');
+    const testRecord3 = tstRecord('TEST3');
+    const server = await createVersionedTable<TstRecordType>({
+      primaryKey: '_id',
+      tableName: 'tst'
+    });
+    await server.addRecord(testRecord1);
+    await server.addRecord(testRecord2);
+    await server.addRecord(testRecord3);
+    const channel = createInMemoryVTChannel(server);
+    const {lastCommitId, rows} = await channel.cloneTable<TstRecordType>('tst');
+    const client1 = await createVersionedTable<TstRecordType>({
+      tableName: 'tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    const client2 = await createVersionedTable<TstRecordType>({
+      tableName: 'tst',
+      primaryKey: '_id',
+      initialData: {
+        commitId: lastCommitId,
+        data: rows
+      }
+    });
+    await client2.updateRecord('TEST2', {name: 'Not null anymore'});
+    await push(client2, channel);
+    const delta = server.getHistoryDelta(client1.lastRemoteCommitId!);
+    expect(delta).not.toBe(null);
+    expect(delta!.changes.length).toBe(1);
+    expect(delta!.changes[0]).toMatchObject({
+      changes: {name: 'Not null anymore'}
+    });
   });
 });
