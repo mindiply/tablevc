@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+# [0.0.6] - 2021-03-41
+
+## Changes
+- **generateNewId** uses crypto secure random id generation
+
 # [0.0.5] - 2021-03-11
 
 ## Added
