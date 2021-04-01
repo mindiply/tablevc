@@ -1,6 +1,6 @@
 {
   "name": "tablevc",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Version control of tables of data",
   "main": "lib/index.js",
   "scripts": {
