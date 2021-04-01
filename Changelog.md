@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
-# [0.0.6] - 2021-03-41
+# [0.0.7] - 2021-04-01
+
+## Fixes
+- **generateNewId** now depends on isoMorphic randombytes package
+
+
+# [0.0.6] - 2021-03-31
 
 ## Changes
 - **generateNewId** uses crypto secure random id generation
