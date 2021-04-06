@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+# [0.0.8] - 2021-04-06
+
+## Added
+- When querying the table synchronously or asynchronously,
+you can pass a filter expression to narrow down the records to retrieve.
+
+
+    tbl.getRecords(
+      notEquals(
+        fieldReference<TstRecordType>('name'),
+        scalarValue('second')
+      )
+    )
+
 # [0.0.7] - 2021-04-01
 
 ## Fixes

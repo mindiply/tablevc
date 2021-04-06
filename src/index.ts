@@ -13,3 +13,8 @@ export {
   pull,
   push
 } from './synchronization';
+export * from './tableFilterExpression';
+export type {
+  TableFilterExpression,
+  FilterExpressionType
+} from './tableFiltersTypes';

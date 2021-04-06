@@ -1,3 +1,9 @@
+import {
+  BaseFilterExpression,
+  EmptyFilterExpression,
+  TableFilterExpression
+} from './tableFiltersTypes';
+
 export type Id = number | string;
 
 export interface KeyFilter<RecordType> {
@@ -13,9 +19,13 @@ export interface SyncReadTable<RecordType> {
   readonly tableName: string;
   readonly primaryKey: keyof RecordType;
   syncGetRecord: (key: Id) => RecordType | undefined;
-  syncGetRecords: (keys?: Id[] | KeyFilter<RecordType>) => RecordType[];
+  syncGetRecords: <Ext extends BaseFilterExpression = EmptyFilterExpression>(
+    keys?: Id[] | KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => RecordType[];
   syncHasRecord: (key: Id) => boolean;
-  syncAllKeys: (filter?: KeyFilter<RecordType>) => Id[];
+  syncAllKeys: <Ext extends BaseFilterExpression = EmptyFilterExpression>(
+    filter?: KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => Id[];
   syncSize: () => number;
 }
 
@@ -23,9 +33,13 @@ export interface ReadTable<RecordType> {
   readonly tableName: string;
   readonly primaryKey: keyof RecordType;
   getRecord: (key: Id) => Promise<RecordType | undefined>;
-  getRecords: (keys?: Id[] | KeyFilter<RecordType>) => Promise<RecordType[]>;
+  getRecords: <Ext extends BaseFilterExpression = EmptyFilterExpression>(
+    keys?: Id[] | KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => Promise<RecordType[]>;
   hasRecord: (key: Id) => Promise<boolean>;
-  allKeys: (filter?: KeyFilter<RecordType>) => Promise<Id[]>;
+  allKeys: <Ext extends BaseFilterExpression = EmptyFilterExpression>(
+    filter?: KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => Promise<Id[]>;
   size: () => Promise<number>;
 }
 

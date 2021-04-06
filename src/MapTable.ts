@@ -13,6 +13,13 @@ import {
   WritableTable
 } from './types';
 import {generateNewId} from './generateId';
+import {
+  BaseFilterExpression,
+  EmptyFilterExpression,
+  FilterExpressionType,
+  TableFilterExpression
+} from './tableFiltersTypes';
+import {isBinaryFilter, isTableFilterExpression} from './tableFilterExpression';
 
 interface FullTableFunctionality<RecordType>
   extends Table<RecordType>,
@@ -61,14 +68,21 @@ class MapTable<RecordType>
 
   public syncHasRecord = (key: Id) => this.records.has(key);
 
-  public syncAllKeys = (filter?: (record: RecordType) => boolean) =>
-    filter
-      ? Array.from(this.records.entries())
-          .filter(([, record]) => filter(record))
-          .map(([key]) => key)
-      : Array.from(this.records.keys());
+  public syncAllKeys = <
+    Ext extends BaseFilterExpression = EmptyFilterExpression
+  >(
+    filter?: KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => {
+    return this.syncGetRecords(filter).map(
+      record => (record[this.primaryKey] as unknown) as Id
+    );
+  };
 
-  public syncGetRecords = (keys?: Id[] | KeyFilter<RecordType>) => {
+  public syncGetRecords = <
+    Ext extends BaseFilterExpression = EmptyFilterExpression
+  >(
+    keys?: Id[] | KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => {
     if (keys === undefined) {
       return Array.from(this.records.values());
     }
@@ -80,9 +94,16 @@ class MapTable<RecordType>
           records.push(record);
         }
       }
+    } else if (isTableFilterExpression(keys)) {
+      const filterFn = filterFunctionFromExpression<RecordType>(keys);
+      for (const record of this.records.values()) {
+        if (filterFn(record)) {
+          records.push(record);
+        }
+      }
     } else if (typeof keys === 'function') {
       for (const record of this.records.values()) {
-        if (keys(record)) {
+        if ((keys as KeyFilter<RecordType>)(record)) {
           records.push(record);
         }
       }
@@ -96,8 +117,11 @@ class MapTable<RecordType>
 
   public hasRecord = async (key: Id) => this.syncHasRecord(key);
 
-  public allKeys = async (filter?: (record: RecordType) => boolean) =>
-    this.syncAllKeys(filter);
+  public allKeys = async <
+    Ext extends BaseFilterExpression = EmptyFilterExpression
+  >(
+    filter?: KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => this.syncAllKeys(filter);
 
   public setRecord = async (
     key: Id | Partial<RecordType>,
@@ -137,8 +161,11 @@ class MapTable<RecordType>
     }
   };
 
-  public getRecords = async (keys?: Id[] | KeyFilter<RecordType>) =>
-    this.syncGetRecords(keys);
+  public getRecords = async <
+    Ext extends BaseFilterExpression = EmptyFilterExpression
+  >(
+    keys?: Id[] | KeyFilter<RecordType> | TableFilterExpression<RecordType, Ext>
+  ) => this.syncGetRecords(keys);
 }
 
 export const mapTableFactory = <RecordType>(
@@ -146,3 +173,67 @@ export const mapTableFactory = <RecordType>(
   primaryKey: keyof RecordType,
   options?: TablePopulationData<RecordType>
 ): Table<RecordType> => new MapTable(tableName, primaryKey, options);
+
+function filterFunctionFromExpression<RecordType>(
+  filterExpression: TableFilterExpression<RecordType>
+): KeyFilter<RecordType> {
+  const resolveFn = resolveFilterExpression(filterExpression);
+  return (record: RecordType) => Boolean(resolveFn(record));
+}
+
+function resolveFilterExpression<RecordType = any>(
+  filterExpression: TableFilterExpression<RecordType>
+): (record: RecordType) => any {
+  if (isBinaryFilter(filterExpression)) {
+    const leftFn = resolveFilterExpression(filterExpression.left);
+    const rightFn = resolveFilterExpression(filterExpression.right);
+    if (filterExpression.__typename === FilterExpressionType.equals) {
+      return record => Boolean(leftFn(record) === rightFn(record));
+    } else if (filterExpression.__typename === FilterExpressionType.notEquals) {
+      return record => Boolean(leftFn(record) !== rightFn(record));
+    } else if (filterExpression.__typename === FilterExpressionType.moreThan) {
+      return record => Boolean(leftFn(record) > rightFn(record));
+    } else if (
+      filterExpression.__typename === FilterExpressionType.moreEquals
+    ) {
+      return record => Boolean(leftFn(record) >= rightFn(record));
+    } else if (filterExpression.__typename === FilterExpressionType.lessThan) {
+      return record => Boolean(leftFn(record) < rightFn(record));
+    } else if (
+      filterExpression.__typename === FilterExpressionType.lessEquals
+    ) {
+      return record => Boolean(leftFn(record) <= rightFn(record));
+    }
+  } else if (
+    filterExpression.__typename === FilterExpressionType.fieldReference
+  ) {
+    return record => record[filterExpression.fieldReference];
+  } else if (filterExpression.__typename === FilterExpressionType.scalar) {
+    return () => filterExpression.value;
+  } else if (
+    filterExpression.__typename === FilterExpressionType.quotedString
+  ) {
+    return () => `'${filterExpression.text}'`;
+  } else if (filterExpression.__typename === FilterExpressionType.not) {
+    const toFilterFn = resolveFilterExpression(filterExpression.expression);
+    return record => !Boolean(toFilterFn(record));
+  } else if (
+    filterExpression.__typename === FilterExpressionType.and ||
+    filterExpression.__typename === FilterExpressionType.or
+  ) {
+    const filterFns = filterExpression.expressions.map(expression =>
+      resolveFilterExpression(expression)
+    );
+    const breakIf =
+      filterExpression.__typename === FilterExpressionType.or ? true : false;
+    return record => {
+      for (let i = 0; i < filterFns.length; i++) {
+        if (filterFns[i](record) === breakIf) {
+          return breakIf ? true : false;
+        }
+      }
+      return !breakIf;
+    };
+  }
+  return () => false;
+}
