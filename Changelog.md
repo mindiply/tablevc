@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+# [0.0.9] - 2021-04-06
+
+## Fixes
+- Small fix in exports needed by tablevc-pg
+
 # [0.0.8] - 2021-04-06
 
 ## Added

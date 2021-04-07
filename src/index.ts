@@ -15,6 +15,8 @@ export {
 } from './synchronization';
 export * from './tableFilterExpression';
 export type {
-  TableFilterExpression,
-  FilterExpressionType
+  BaseFilterExpression,
+  EmptyFilterExpression,
+  TableFilterExpression
 } from './tableFiltersTypes';
+export {FilterExpressionType} from './tableFiltersTypes';
