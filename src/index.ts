@@ -5,7 +5,11 @@ export {
   MemoryTableVersionHistory
 } from './VersionedTable';
 export {generateNewId} from './generateId';
-export {createVersionedTable, emptyMemoryVersionTable} from './factories';
+export {
+  createVersionedTable,
+  emptyMemoryVersionTable,
+  createInMemoryVersionedTable
+} from './factories';
 export {mapTableFactory} from './MapTable';
 export {
   cloneTable,

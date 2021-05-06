@@ -385,3 +385,10 @@ export interface EmptyMemoryVersionedTableProps<RecordType> {
   primaryKey: keyof RecordType;
   who?: Id;
 }
+
+export interface CreateInMemoryVersionedTableProps<RecordType> {
+  tableName: string;
+  primaryKey: keyof RecordType;
+  who?: Id;
+  initialData?: VersionedTablePopulationData<RecordType>;
+}

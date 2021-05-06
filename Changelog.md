@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+# [0.0.10] - 2021-05-06
+
+## Added
+- **createInMemoryVersionedTable** allows creating an in memory versioned table, optionally with
+existing data. Useful for branching an existing table with new data.
+
 # [0.0.9] - 2021-04-06
 
 ## Fixes

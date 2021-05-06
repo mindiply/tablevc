@@ -1,5 +1,8 @@
 import {Id, TableOperationType, VersionedTableChangeListener} from '../src';
-import {createVersionedTable} from '../src/factories';
+import {
+  createVersionedTable,
+  createInMemoryVersionedTable
+} from '../src/factories';
 
 interface TstRecordType {
   _id: Id;
@@ -492,6 +495,73 @@ describe('Merging different branches', () => {
       await h1.updateRecord(testRecord._id, {amount: 251177});
       await h1.addRecord(testRecord2);
       await h1.tx(async db => {
+        await db.deleteRecord(testRecord._id);
+        await db.deleteRecord(testRecord2._id);
+      });
+      expect(await (async () => sizeCount.counts)()).toEqual([1, 1, 2, 0]);
+    });
+  });
+
+  describe('In memory table created with createInMemoryVersionedTable', () => {
+    test('Simple operations from empty table', async () => {
+      const sizeCount = new Counter();
+      const testListener: VersionedTableChangeListener<TstRecordType> = tvc => {
+        sizeCount.setCount(tvc.syncTbl!.syncSize());
+      };
+      const testRecord = {
+        ...emptyTestRecord(),
+        _id: 'TEST1'
+      };
+      const testRecord2 = {
+        ...emptyTestRecord(),
+        _id: 'TEST2'
+      };
+      const h1 = createInMemoryVersionedTable<TstRecordType>({
+        primaryKey: '_id',
+        tableName: 'Tst'
+      });
+      h1.subscribeToChanges(testListener);
+      await h1.addRecord(testRecord._id, testRecord);
+      await h1.updateRecord(testRecord._id, {amount: 251177});
+      await h1.addRecord(testRecord2);
+      await h1.tx(async db => {
+        await db.deleteRecord(testRecord._id);
+        await db.deleteRecord(testRecord2._id);
+      });
+      expect(await (async () => sizeCount.counts)()).toEqual([1, 1, 2, 0]);
+    });
+
+    test('Simple operations from table with existing data', async () => {
+      const sizeCount = new Counter();
+      const testListener: VersionedTableChangeListener<TstRecordType> = tvc => {
+        sizeCount.setCount(tvc.syncTbl!.syncSize());
+      };
+      const testRecord = {
+        ...emptyTestRecord(),
+        _id: 'TEST1'
+      };
+      const testRecord2 = {
+        ...emptyTestRecord(),
+        _id: 'TEST2'
+      };
+      const h1 = createInMemoryVersionedTable<TstRecordType>({
+        primaryKey: '_id',
+        tableName: 'Tst'
+      });
+      h1.subscribeToChanges(testListener);
+      await h1.addRecord(testRecord._id, testRecord);
+      const h2 = createInMemoryVersionedTable<TstRecordType>({
+        primaryKey: '_id',
+        tableName: 'Tst',
+        initialData: {
+          commitId: h1.lastCommitId(),
+          data: h1.syncTbl!.syncGetRecords()
+        }
+      });
+      h2.subscribeToChanges(testListener);
+      await h2.updateRecord(testRecord._id, {amount: 251177});
+      await h2.addRecord(testRecord2);
+      await h2.tx(async db => {
         await db.deleteRecord(testRecord._id);
         await db.deleteRecord(testRecord2._id);
       });

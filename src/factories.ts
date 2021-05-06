@@ -1,5 +1,6 @@
 import {
   BaseCreateVersionedTableProps,
+  CreateInMemoryVersionedTableProps,
   CreateVersionedTableProps,
   CreateVersionedTablePropsFromCommit,
   CreateVersionedTablePropsWithData,
@@ -122,5 +123,42 @@ export async function createVersionedTable<RecordType>(
       (options as CreateVersionedTablePropsWithData<RecordType>).initialData!
     );
   }
+  return versionedTable;
+}
+
+/**
+ * Creates an in memory versioned table, optionally filling in with data from another table.
+ * Useful for cloning local versions of an existing table with data.
+ *
+ * @param {string} tableName
+ * @param {keyof RecordType} primaryKey
+ * @param {number | string | undefined} who
+ * @param {VersionedTablePopulationData<RecordType> | undefined} initialData
+ * @returns {VersionedTable<RecordType>}
+ */
+export function createInMemoryVersionedTable<RecordType>({
+  tableName,
+  primaryKey,
+  who,
+  initialData
+}: CreateInMemoryVersionedTableProps<RecordType>): VersionedTable<RecordType> {
+  const memoryTable = mapTableFactory<RecordType>(
+    tableName,
+    primaryKey,
+    initialData
+      ? {
+          data: initialData.data
+        }
+      : undefined
+  );
+  const logTbl = createMappedVersioningHistoryList<RecordType>({
+    who,
+    fromCommitId: initialData ? initialData.commitId : undefined
+  });
+  const versionedTable = internalCreateVersionedTable<RecordType>({
+    table: memoryTable,
+    tableHistory: logTbl,
+    who
+  });
   return versionedTable;
 }
